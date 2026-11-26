@@ -2,26 +2,31 @@
 
 Launcher Minecraft officiel des différents serveurs de **Moky Studios**, développé en Rust.
 
-## Installateur Windows
+## Installation Windows
 
-La CI GitHub Actions compile un exécutable Windows x64 nommé **MokyLauncher-Setup.exe**.
+Téléchargez **MokyLauncher-Setup.exe** depuis la dernière [GitHub Release](https://github.com/KuaFeur/moky-launcher/releases).
 
-Cet exécutable est à la fois l’installateur et l’application :
-- première ouverture : interface d’installation graphique ;
-- installation dans `%LOCALAPPDATA%\\Programs\\Moky Studios\\Moky Launcher` ;
-- création de raccourcis dans le menu Démarrer et sur le Bureau ;
-- lancement de l’application installée ;
-- ouvertures suivantes : interface Moky Launcher et vérification des mises à jour GitHub.
+L'installateur et l'application utilisent le même exécutable :
+- première ouverture : installation graphique dans `%LOCALAPPDATA%\\Programs\\Moky Studios\\Moky Launcher` ;
+- création des raccourcis dans le menu Démarrer et sur le Bureau ;
+- ouvertures suivantes : une fenêtre de démarrage vérifie les mises à jour avant d'ouvrir l'interface.
 
-L’interface utilise un thème sombre avec accents violets. Les fonctionnalités de sélection et de lancement des serveurs Minecraft seront ajoutées ensuite.
+## Mise à jour automatique
+
+Chaque release doit contenir deux fichiers :
+- `MokyLauncher-Setup.exe` : installation initiale ou réinstallation ;
+- `MokyLauncher.exe` : binaire autonome utilisé par le mécanisme de mise à jour.
+
+À chaque ouverture, le launcher compare sa version avec la dernière release GitHub. Si une version plus récente existe, il télécharge `MokyLauncher.exe`, vérifie que le fichier est complet et qu'il s'agit d'un exécutable Windows, remplace sa propre version puis redémarre. Si aucune mise à jour n'est disponible, ou si GitHub est inaccessible, l'interface principale s'ouvre normalement.
 
 ## CI et releases
 
-- Chaque push sur `main` compile l’installateur.
-- L’artefact CI est conservé pendant 30 jours.
-- Chaque tag de version au format `vX.Y.Z` publie une GitHub Release contenant `MokyLauncher-Setup.exe`.
+- Chaque pull request compile le projet sur Windows x64.
+- Chaque push sur `main` compile et publie l'artefact de build.
+- Chaque push sur `main` publie automatiquement une GitHub Release correspondant à la version de `Cargo.toml`.
+- Chaque tag au format `vX.Y.Z` publie également les deux exécutables dans une GitHub Release.
 
-Pour publier une version, mettre à jour le champ `version` de `Cargo.toml`, puis créer un tag correspondant, par exemple `v0.1.1`.
+Pour publier une version, mettre à jour le champ `version` de `Cargo.toml`, puis fusionner les changements dans `main`. La CI crée la release `v` correspondante automatiquement.
 
 ## Développement
 

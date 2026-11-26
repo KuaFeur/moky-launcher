@@ -25,45 +25,47 @@ jobs:
       - name: Build installer
         run: cargo build --release
 
-      - name: Rename installer
+      - name: Prepare release binaries
         shell: pwsh
-        run: Copy-Item target/release/moky-launcher.exe MokyLauncher-Setup.exe
+        run: |
+          Copy-Item target/release/moky-launcher.exe MokyLauncher-Setup.exe
+          Copy-Item target/release/moky-launcher.exe MokyLauncher.exe
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: MokyLauncher-Setup
-          path: MokyLauncher-Setup.exe
+          path: |
+            MokyLauncher-Setup.exe
+            MokyLauncher.exe
           if-no-files-found: error
           retention-days: 30
 
-      - name: Check whether alpha release already exists
-        id: alpha
-        if: github.ref == 'refs/heads/main'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const { data: releases } = await github.rest.repos.listReleases({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 100
-            });
-            core.setOutput('exists', releases.some(release => release.tag_name === 'v0.1.0-alpha.1'));
+      - name: Read package version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"').Matches.Groups[1].Value
+          "version=$version" >> $env:GITHUB_OUTPUT
 
-      - name: Publish initial alpha release
-        if: github.ref == 'refs/heads/main' && steps.alpha.outputs.exists == 'false'
+      - name: Publish versioned release from main
+        if: github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.1.0-alpha.1
+          tag_name: v${{ steps.version.outputs.version }}
           target_commitish: main
-          name: Moky Launcher v0.1.0-alpha.1
-          prerelease: true
+          name: Moky Launcher v${{ steps.version.outputs.version }}
+          prerelease: ${{ contains(steps.version.outputs.version, '-') }}
           generate_release_notes: true
-          files: MokyLauncher-Setup.exe
+          files: |
+            MokyLauncher-Setup.exe
+            MokyLauncher.exe
 
       - name: Publish tagged GitHub release
-        if: startsWith(github.ref, 'refs/tags/v') && github.ref != 'refs/tags/v0.1.0-alpha.1'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: MokyLauncher-Setup.exe
+          files: |
+            MokyLauncher-Setup.exe
+            MokyLauncher.exe

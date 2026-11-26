@@ -1,12 +1,14 @@
 #![windows_subsystem = "windows"]
 
+mod auth;
+
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use serde::Deserialize;
 use std::{
     env,
     error::Error,
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::mpsc::{self, Receiver, Sender},
@@ -15,7 +17,7 @@ use std::{
 };
 
 const REPOSITORY: &str = "KuaFeur/moky-launcher";
-const ASSET_NAME: &str = "MokyLauncher-Setup.exe";
+const ASSET_NAME: &str = "MokyLauncher.exe";
 const APP_NAME: &str = "Moky Launcher";
 const BG: Color32 = Color32::BLACK;
 const PANEL: Color32 = Color32::from_rgb(10, 10, 10);
@@ -46,12 +48,17 @@ enum Event {
     UpToDate(String),
     Updated(String),
     Failed(String),
+    SessionRestored(Option<auth::MinecraftProfile>),
+    Authenticated(auth::MinecraftProfile),
+    AuthFailed(String),
+    DownloadProgress(String, f32),
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Screen {
     Installer,
     Installing,
+    Startup,
     Launcher,
 }
 
@@ -63,29 +70,40 @@ struct MokyApp {
     sender: Sender<Event>,
     install_error: Option<String>,
     install_path: PathBuf,
+    profile: Option<auth::MinecraftProfile>,
+    auth_busy: bool,
+    startup_progress: f32,
 }
 
 impl MokyApp {
     fn new() -> Self {
         let install_path = installation_path();
-        let installed = env::current_exe()
-            .ok()
-            .and_then(|p| p.canonicalize().ok())
-            == Some(install_path.join("MokyLauncher.exe").canonicalize().unwrap_or_default());
+        let installed = is_installed();
+        let skip_update = env::args().any(|arg| arg == "--launch");
 
         let (sender, receiver) = mpsc::channel();
         let mut app = Self {
-            screen: if installed { Screen::Launcher } else { Screen::Installer },
+            screen: if !installed { Screen::Installer } else if skip_update { Screen::Launcher } else { Screen::Startup },
             status: if installed { "Recherche des mises à jour…".into() } else { "Prêt à installer".into() },
             version: env!("CARGO_PKG_VERSION").into(),
             receiver,
             sender,
             install_error: None,
             install_path,
+            profile: None,
+            auth_busy: false,
+            startup_progress: 0.0,
         };
 
         if installed {
-            app.start_update_check();
+            let sender = app.sender.clone();
+            thread::spawn(move || {
+                let result = auth::restore_session().unwrap_or(None);
+                let _ = sender.send(Event::SessionRestored(result));
+            });
+            if !skip_update {
+                app.start_update_check();
+            }
         }
         app
     }
@@ -133,13 +151,28 @@ impl MokyApp {
                 Event::Downloading(version) => self.status = format!("Téléchargement de la version {version}…"),
                 Event::UpToDate(version) => {
                     self.version = version;
-                    self.status = "Votre launcher est à jour".into();
+                    self.screen = Screen::Launcher;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(620.0, 650.0)));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
                 }
-                Event::Updated(version) => {
-                    self.version = version.clone();
-                    self.status = format!("Mise à jour {version} prête. Redémarrez le launcher pour l’appliquer.");
+                Event::DownloadProgress(version, progress) => {
+                    self.status = format!("Téléchargement de la version {version}…");
+                    self.startup_progress = progress;
                 }
-                Event::Failed(error) => self.status = format!("Vérification indisponible : {error}"),
+                Event::Updated(_version) => {
+                    if let Ok(exe) = env::current_exe() {
+                        let _ = Command::new(exe).arg("--launch").spawn();
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                Event::Failed(_error) => {
+                    self.screen = Screen::Launcher;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(620.0, 650.0)));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
+                },
+                Event::SessionRestored(profile) => self.profile = profile,
+                Event::Authenticated(profile) => { self.profile = Some(profile); self.auth_busy = false; },
+                Event::AuthFailed(error) => { self.auth_busy = false; self.status = error; },
             }
             ctx.request_repaint();
         }
@@ -173,36 +206,63 @@ impl eframe::App for MokyApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(BG).inner_margin(egui::Margin::same(30)))
             .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui_material_icons::icons::ICON_APPS);
-                        ui.add_space(12.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("MOKY").font(FontId::proportional(17.0)).strong().color(TEXT));
-                            ui.label(RichText::new("STUDIOS").font(FontId::proportional(10.0)).strong().color(TEXT));
+                if self.screen == Screen::Startup {
+                    self.startup_ui(ui);
+                } else {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui_material_icons::icons::ICON_APPS);
+                            ui.add_space(12.0);
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new("MOKY").font(FontId::proportional(17.0)).strong().color(TEXT));
+                                ui.label(RichText::new("STUDIOS").font(FontId::proportional(10.0)).strong().color(TEXT));
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                pill(ui, "OFFICIAL", Color32::WHITE);
+                            });
                         });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            pill(ui, "OFFICIAL", Color32::WHITE);
-                        });
-                    });
 
-                    ui.add_space(34.0);
-                    match self.screen {
-                        Screen::Installer => self.installer_ui(ui, ctx),
-                        Screen::Installing => self.installing_ui(ui),
-                        Screen::Launcher => self.launcher_ui(ui),
-                    }
-                    ui.add_space(20.0);
-                    ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
-                        ui.label(RichText::new(format!("MOKY STUDIOS  •  VERSION {}", self.version))
-                            .size(10.0).strong().color(MUTED));
+                        ui.add_space(34.0);
+                        match self.screen {
+                            Screen::Installer => self.installer_ui(ui, ctx),
+                            Screen::Installing => self.installing_ui(ui),
+                            Screen::Launcher => self.launcher_ui(ui, ctx),
+                            Screen::Startup => unreachable!(),
+                        }
+                        ui.add_space(20.0);
+                        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+                            ui.label(RichText::new(format!("MOKY STUDIOS  •  VERSION {}", self.version))
+                                .size(10.0).strong().color(MUTED));
+                        });
                     });
-                });
+                }
             });
     }
 }
 
 impl MokyApp {
+    fn startup_ui(&self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(12.0);
+            ui.label(RichText::new("MOKY STUDIOS").size(10.0).strong().color(MUTED));
+            ui.add_space(8.0);
+            ui.label(RichText::new("Moky Launcher").size(22.0).strong().color(TEXT));
+            ui.add_space(8.0);
+            let label = if self.startup_progress > 0.0 {
+                "Téléchargement de la mise à jour…"
+            } else {
+                "Recherche des mises à jour…"
+            };
+            ui.label(RichText::new(label).size(12.0).color(MUTED));
+            ui.add_space(14.0);
+            ui.add(egui::ProgressBar::new(self.startup_progress)
+                .desired_width(330.0)
+                .text(format!("{:.0}%", self.startup_progress * 100.0))
+                .animate(true)
+                .fill(Color32::WHITE));
+        });
+    }
+
     fn installer_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.add_space(42.0);
         ui.label(RichText::new("MOKY STUDIOS").size(11.0).strong().color(MUTED));
@@ -246,26 +306,60 @@ impl MokyApp {
         });
     }
 
-    fn launcher_ui(&mut self, ui: &mut egui::Ui) {
+    fn launcher_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.label(RichText::new("BIENVENUE SUR").size(12.0).strong().color(PURPLE));
         ui.label(RichText::new("Moky Launcher").size(34.0).strong().color(TEXT));
         ui.add_space(8.0);
         ui.label(RichText::new("Tous vos serveurs. Une seule destination.").size(14.0).color(MUTED));
         ui.add_space(24.0);
 
+        let current_profile = self.profile.clone();
+        let mut logout_clicked = false;
         panel(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("ÉTAT DU LAUNCHER").size(10.0).strong().color(MUTED));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    pill(ui, "EN LIGNE", GREEN);
-                });
-            });
+            ui.label(RichText::new("COMPTE MINECRAFT").size(10.0).strong().color(MUTED));
             ui.add_space(12.0);
-            ui.label(RichText::new(&self.status).size(14.0).color(TEXT));
-            ui.add_space(8.0);
-            ui.label(RichText::new(format!("Version installée : {}", self.version)).size(11.0).color(MUTED));
+            if let Some(profile) = current_profile.as_ref() {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&profile.name).size(19.0).strong().color(TEXT));
+                        ui.label(RichText::new(format!("UUID : {}", profile.id)).size(10.0).color(MUTED));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("Déconnexion").clicked() {
+                            logout_clicked = true;
+                        }
+                    });
+                });
+            } else if self.auth_busy {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("Connexion à Microsoft…").size(13.0).color(MUTED));
+                });
+            } else {
+                ui.label(RichText::new("Connectez votre compte Microsoft pour accéder à Minecraft.").size(13.0).color(MUTED));
+                ui.add_space(10.0);
+                if primary_button(ui, "Se connecter avec Microsoft") {
+                    self.auth_busy = true;
+                    self.status.clear();
+                    let sender = self.sender.clone();
+                    thread::spawn(move || {
+                        match auth::sign_in() {
+                            Ok(profile) => { let _ = sender.send(Event::Authenticated(profile)); }
+                            Err(error) => { let _ = sender.send(Event::AuthFailed(error)); }
+                        }
+                    });
+                }
+            }
         });
 
+        if logout_clicked {
+            let _ = auth::sign_out();
+            self.profile = None;
+        }
+        if !self.status.is_empty() {
+            ui.add_space(10.0);
+            ui.label(RichText::new(&self.status).size(11.0).color(MUTED));
+        }
         ui.add_space(18.0);
         panel(ui, |ui| {
             ui.label(RichText::new("VOS UNIVERS").size(11.0).strong().color(PURPLE));
@@ -278,6 +372,12 @@ impl MokyApp {
             self.status = "La sélection des serveurs sera disponible prochainement.".into();
         }
     }
+}
+
+fn is_installed() -> bool {
+    let path = installation_path().join("MokyLauncher.exe");
+    env::current_exe().ok().and_then(|p| p.canonicalize().ok())
+        == path.canonicalize().ok()
 }
 
 fn installation_path() -> PathBuf {
@@ -341,10 +441,30 @@ fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn E
     let asset = release.assets.iter().find(|asset| asset.name == ASSET_NAME)
         .ok_or("L’installateur Windows est absent de la dernière release GitHub")?;
     let mut response = client.get(&asset.browser_download_url).send()?.error_for_status()?;
+    let total = response.content_length().unwrap_or(0);
+    let mut downloaded = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
     let mut temporary_file = tempfile::Builder::new()
         .prefix("moky-launcher-update-").suffix(".exe").tempfile()?;
-    response.copy_to(&mut temporary_file)?;
+    loop {
+        let count = response.read(&mut buffer)?;
+        if count == 0 { break; }
+        temporary_file.write_all(&buffer[..count])?;
+        downloaded += count as u64;
+        let progress = if total > 0 { downloaded as f32 / total as f32 } else { 0.0 };
+        let _ = sender.send(Event::DownloadProgress(latest.to_string(), progress.clamp(0.0, 1.0)));
+    }
     temporary_file.flush()?;
+    if downloaded == 0 || (total > 0 && downloaded != total) {
+        return Err("Le téléchargement du programme est incomplet.".into());
+    }
+    let mut signature = [0u8; 2];
+    use std::io::{Seek, SeekFrom};
+    temporary_file.as_file_mut().seek(SeekFrom::Start(0))?;
+    temporary_file.as_file_mut().read_exact(&mut signature)?;
+    if &signature != b"MZ" {
+        return Err("Le fichier téléchargé n’est pas un exécutable Windows valide.".into());
+    }
     self_replace::self_replace(temporary_file.path())?;
     Ok(Some(latest.to_string()))
 }
@@ -384,12 +504,13 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
+    let startup_window = is_installed() && !env::args().any(|arg| arg == "--launch");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([620.0, 650.0])
-            .with_min_inner_size([560.0, 600.0])
+            .with_inner_size(if startup_window { [420.0, 190.0] } else { [620.0, 650.0] })
+            .with_min_inner_size(if startup_window { [420.0, 190.0] } else { [560.0, 600.0] })
             .with_resizable(false)
-            .with_title("Moky Launcher — Moky Studios"),
+            .with_title(if startup_window { "Moky Launcher — Mise à jour" } else { "Moky Launcher — Moky Studios" }),
         ..Default::default()
     };
 
