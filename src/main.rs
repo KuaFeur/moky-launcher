@@ -1,5 +1,7 @@
 #![windows_subsystem = "windows"]
 
+mod auth;
+
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use serde::Deserialize;
 use std::{
@@ -46,6 +48,9 @@ enum Event {
     UpToDate(String),
     Updated(String),
     Failed(String),
+    SessionRestored(Option<auth::MinecraftProfile>),
+    Authenticated(auth::MinecraftProfile),
+    AuthFailed(String),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -63,6 +68,8 @@ struct MokyApp {
     sender: Sender<Event>,
     install_error: Option<String>,
     install_path: PathBuf,
+    profile: Option<auth::MinecraftProfile>,
+    auth_busy: bool,
 }
 
 impl MokyApp {
@@ -82,9 +89,16 @@ impl MokyApp {
             sender,
             install_error: None,
             install_path,
+            profile: None,
+            auth_busy: false,
         };
 
         if installed {
+            let sender = app.sender.clone();
+            thread::spawn(move || {
+                let result = auth::restore_session().unwrap_or(None);
+                let _ = sender.send(Event::SessionRestored(result));
+            });
             app.start_update_check();
         }
         app
@@ -140,6 +154,9 @@ impl MokyApp {
                     self.status = format!("Mise à jour {version} prête. Redémarrez le launcher pour l’appliquer.");
                 }
                 Event::Failed(error) => self.status = format!("Vérification indisponible : {error}"),
+                Event::SessionRestored(profile) => self.profile = profile,
+                Event::Authenticated(profile) => { self.profile = Some(profile); self.auth_busy = false; },
+                Event::AuthFailed(error) => { self.auth_busy = false; self.status = error; },
             }
             ctx.request_repaint();
         }
@@ -190,7 +207,7 @@ impl eframe::App for MokyApp {
                     match self.screen {
                         Screen::Installer => self.installer_ui(ui, ctx),
                         Screen::Installing => self.installing_ui(ui),
-                        Screen::Launcher => self.launcher_ui(ui),
+                        Screen::Launcher => self.launcher_ui(ui, ctx),
                     }
                     ui.add_space(20.0);
                     ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
@@ -246,7 +263,7 @@ impl MokyApp {
         });
     }
 
-    fn launcher_ui(&mut self, ui: &mut egui::Ui) {
+    fn launcher_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.label(RichText::new("BIENVENUE SUR").size(12.0).strong().color(PURPLE));
         ui.label(RichText::new("Moky Launcher").size(34.0).strong().color(TEXT));
         ui.add_space(8.0);
@@ -254,18 +271,47 @@ impl MokyApp {
         ui.add_space(24.0);
 
         panel(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("ÉTAT DU LAUNCHER").size(10.0).strong().color(MUTED));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    pill(ui, "EN LIGNE", GREEN);
-                });
-            });
+            ui.label(RichText::new("COMPTE MINECRAFT").size(10.0).strong().color(MUTED));
             ui.add_space(12.0);
-            ui.label(RichText::new(&self.status).size(14.0).color(TEXT));
-            ui.add_space(8.0);
-            ui.label(RichText::new(format!("Version installée : {}", self.version)).size(11.0).color(MUTED));
+            if let Some(profile) = &self.profile {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(&profile.name).size(19.0).strong().color(TEXT));
+                        ui.label(RichText::new(format!("UUID : {}", profile.id)).size(10.0).color(MUTED));
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button("Déconnexion").clicked() {
+                            let _ = auth::sign_out();
+                            self.profile = None;
+                        }
+                    });
+                });
+            } else if self.auth_busy {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("Connexion à Microsoft…").size(13.0).color(MUTED));
+                });
+            } else {
+                ui.label(RichText::new("Connectez votre compte Microsoft pour accéder à Minecraft.").size(13.0).color(MUTED));
+                ui.add_space(10.0);
+                if primary_button(ui, "Se connecter avec Microsoft") {
+                    self.auth_busy = true;
+                    self.status.clear();
+                    let sender = self.sender.clone();
+                    thread::spawn(move || {
+                        match auth::sign_in() {
+                            Ok(profile) => { let _ = sender.send(Event::Authenticated(profile)); }
+                            Err(error) => { let _ = sender.send(Event::AuthFailed(error)); }
+                        }
+                    });
+                }
+            }
         });
 
+        if !self.status.is_empty() {
+            ui.add_space(10.0);
+            ui.label(RichText::new(&self.status).size(11.0).color(MUTED));
+        }
         ui.add_space(18.0);
         panel(ui, |ui| {
             ui.label(RichText::new("VOS UNIVERS").size(11.0).strong().color(PURPLE));
