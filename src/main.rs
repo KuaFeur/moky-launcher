@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::{env, error::Error, io::Write, process::Command, time::Duration};
+use std::{env, error::Error, io::Write, time::Duration};
 
 const REPOSITORY: &str = "KuaFeur/moky-launcher";
 const ASSET_NAME: &str = "moky-launcher-windows-x86_64.exe";
@@ -74,13 +74,9 @@ fn main() {
 
     match check_for_updates() {
         Ok(true) => {
-            // Relance immédiatement la nouvelle version après le remplacement.
-            match env::current_exe().and_then(|executable| {
-                Command::new(executable).args(env::args_os().skip(1)).spawn()
-            }) {
-                Ok(_) => return,
-                Err(error) => eprintln!("Mise à jour installée, mais redémarrage impossible : {error}"),
-            }
+            // Sous Windows, self-replace termine le remplacement à la fermeture du processus.
+            println!("Mise à jour installée. La nouvelle version sera utilisée au prochain démarrage.");
+            return;
         }
         Ok(false) => {}
         Err(error) => {
