@@ -99,7 +99,7 @@ fn install_neoforge(client: &Client, root: &Path, minecraft_version: &str, repor
     report("Installation de NeoForge…".into());
     let java = private_java();
     if !java.is_file() { return Err("Java 25 privé est introuvable. Relancez Moky Launcher pour réparer Java.".into()); }
-    let output = Command::new(java).arg("-jar").arg(&installer).arg("--installClient").arg("--gameDir").arg(root).output()?;
+    let output = Command::new(java).arg("-jar").arg(&installer).arg("--installClient").arg(root).output()?;
     if !output.status.success() {
         return Err(format!("L'installation NeoForge a échoué : {} {}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)).into());
     }
