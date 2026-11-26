@@ -165,7 +165,8 @@ pub fn launch_minecraft(
     report: impl Fn(String) + Send + 'static,
 ) -> Result<(), String> {
     let result = (|| -> Result<(), Box<dyn Error + Send + Sync>> {
-        let fresh_profile = crate::auth::restore_session()?
+        let fresh_profile = crate::auth::restore_session()
+            .map_err(std::io::Error::other)?
             .ok_or("La session Microsoft n'est plus disponible. Reconnectez-vous.")?;
         if fresh_profile.id != profile.id {
             return Err("Le compte Microsoft actif a changé. Reconnectez-vous.".into());
