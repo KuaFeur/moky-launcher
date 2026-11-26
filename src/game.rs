@@ -171,7 +171,7 @@ pub fn launch_minecraft(
     profile: MinecraftProfile,
     report: impl Fn(String) + Send + 'static,
 ) -> std::result::Result<(), String> {
-    let result = (|| -> Result<(), Box<dyn Error + Send + Sync>> {
+    let result = (|| -> std::result::Result<(), Box<dyn Error + Send + Sync>> {
         let fresh_profile = crate::auth::restore_session()
             .map_err(std::io::Error::other)?
             .ok_or("La session Microsoft n'est plus disponible. Reconnectez-vous.")?;
