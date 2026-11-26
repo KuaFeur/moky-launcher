@@ -127,6 +127,22 @@ fn http_client() -> Result<Client, Box<dyn Error + Send + Sync>> {
         .build()?)
 }
 
+fn ensure_minecraft_response(
+    response: reqwest::blocking::Response,
+) -> Result<reqwest::blocking::Response, Box<dyn Error + Send + Sync>> {
+    if response.status().as_u16() == 429 {
+        let retry_after = response.headers()
+            .get(reqwest::header::RETRY_AFTER)
+            .and_then(|value| value.to_str().ok())
+            .map(|value| format!(" Indication du serveur : {value}."))
+            .unwrap_or_else(|| " Attendez quelques minutes avant de réessayer.".to_string());
+        return Err(format!(
+            "Minecraft Services limite temporairement les connexions (HTTP 429).{retry_after}"
+        ).into());
+    }
+    Ok(response.error_for_status()?)
+}
+
 fn random_url_token() -> String {
     let mut bytes = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut bytes);
@@ -278,14 +294,14 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         .ok_or("Xbox n'a fourni aucun identifiant utilisateur.")?
         .uhs.clone();
 
-    let minecraft: MinecraftLoginResponse = client
+    let minecraft_response = client
         .post("https://api.minecraftservices.com/authentication/login_with_xbox")
         .json(&MinecraftLoginRequest {
             identity_token: format!("XBL3.0 x={user_hash};{}", xsts.token),
         })
-        .send()?
-        .error_for_status()?
-        .json()?;
+        .send()?;
+    let minecraft: MinecraftLoginResponse =
+        ensure_minecraft_response(minecraft_response)?.json()?;
 
     let entitlements: EntitlementsResponse = client
         .get("https://api.minecraftservices.com/entitlements/mcstore")
