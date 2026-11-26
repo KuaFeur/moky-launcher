@@ -151,7 +151,7 @@ fn open_browser(url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 fn receive_authorization_code(listener: TcpListener, expected_state: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
     listener.set_nonblocking(true)?;
-    let deadline = Instant::now() + Duration::from_secs(240);
+    let deadline = Instant::now() + Duration::from_secs(75);
     loop {
         if Instant::now() > deadline {
             return Err("La connexion Microsoft a expiré. Réessayez.".into());
