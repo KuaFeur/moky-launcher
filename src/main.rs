@@ -50,6 +50,7 @@ enum Event {
     SessionRestoreFailed(String),
     Authenticated(auth::MinecraftProfile),
     AuthFailed(String),
+    DeviceCodeReady(String, String),
     DownloadProgress(String, f32),
     JavaProgress(String, f32),
     GameStatus(String),
@@ -79,6 +80,8 @@ struct MokyApp {
     session_checked: bool,
     startup_finished: bool,
     auth_busy: bool,
+    auth_user_code: Option<String>,
+    auth_verification_uri: Option<String>,
     startup_progress: f32,
     settings_open: bool,
     servers_open: bool,
@@ -104,6 +107,8 @@ impl MokyApp {
             session_checked: false,
             startup_finished: false,
             auth_busy: false,
+            auth_user_code: None,
+            auth_verification_uri: None,
             startup_progress: 0.0,
             settings_open: false,
             servers_open: false,
@@ -239,13 +244,20 @@ impl MokyApp {
                     self.profile = Some(profile);
                     self.session_checked = true;
                     self.auth_busy = false;
+                    self.auth_user_code = None;
+                    self.auth_verification_uri = None;
                     self.status.clear();
                     self.screen = Screen::Launcher;
                     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0)));
                     center_window(ctx, Vec2::new(1080.0, 720.0));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
                 },
-                Event::AuthFailed(error) => { self.auth_busy = false; self.status = error; self.screen = Screen::Auth; },
+                Event::AuthFailed(error) => { self.auth_busy = false; self.auth_user_code = None; self.auth_verification_uri = None; self.status = error; self.screen = Screen::Auth; },
+                Event::DeviceCodeReady(user_code, verification_uri) => {
+                    self.auth_user_code = Some(user_code);
+                    self.auth_verification_uri = Some(verification_uri);
+                    self.status = "Validez le code dans la fenêtre Microsoft. Moky attend la confirmation…".into();
+                },
                 Event::GameStatus(status) => { self.status = status; },
                 Event::GameFailed(error) => { self.game_busy = false; self.status = error; },
                 Event::GameStarted => { self.game_busy = false; self.status = "Minecraft est lancé".into(); },
@@ -306,7 +318,7 @@ impl eframe::App for MokyApp {
                 self.custom_titlebar(ui, ctx);
                 match self.screen {
                     Screen::Startup => self.startup_ui(ui),
-                    Screen::Auth => self.auth_ui(ui),
+                    Screen::Auth => self.auth_ui(ui, ctx),
                     Screen::Installer => self.installer_ui(ui, ctx),
                     Screen::Installing => self.installing_ui(ui),
                     Screen::Launcher => self.launcher_ui(ui, ctx),
@@ -393,7 +405,7 @@ impl MokyApp {
         });
     }
 
-    fn auth_ui(&mut self, ui: &mut egui::Ui) {
+    fn auth_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         let rect = ui.max_rect();
         draw_voxel_backdrop(ui, rect, 0.40);
         let mut clicked = false;
@@ -429,34 +441,53 @@ impl MokyApp {
                         ui.label(RichText::new("Utilisez le compte Microsoft qui possède\nMinecraft: Java Edition.")
                             .size(11.0).color(MUTED));
                         ui.add_space(24.0);
-                        let button = egui::Button::new(
-                            RichText::new(if self.auth_busy { "Connexion en cours…" } else { "Continuer avec Microsoft  →" })
-                                .size(12.0).strong().color(Color32::BLACK)
-                        ).fill(Color32::WHITE).stroke(Stroke::NONE)
-                            .corner_radius(egui::CornerRadius::same(7))
-                            .min_size(Vec2::new(ui.available_width(), 46.0));
-                        clicked = ui.add_enabled(!self.auth_busy, button).clicked();
-                        if self.auth_busy {
-                            ui.add_space(12.0);
-                            ui.spinner();
+                        if let Some(code) = &self.auth_user_code {
+                            ui.add_space(6.0);
+                            ui.label(RichText::new("VOTRE CODE DE CONNEXION").size(8.0).strong().color(MUTED));
+                            ui.add_space(5.0);
+                            ui.label(RichText::new(code).size(30.0).strong().color(TEXT).monospace());
+                            if ui.button("Copier le code").clicked() { ctx.copy_text(code.clone()); }
+                            if let Some(uri) = &self.auth_verification_uri {
+                                if ui.button("Ouvrir la page Microsoft").clicked() { let _ = open::that(uri); }
+                            }
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| { ui.spinner(); ui.label(RichText::new("En attente de votre validation…").size(10.0).color(MUTED)); });
+                        } else {
+                            let button = egui::Button::new(
+                                RichText::new(if self.auth_busy { "Préparation du code…" } else { "Se connecter avec Microsoft  →" })
+                                    .size(12.0).strong().color(Color32::BLACK)
+                            ).fill(Color32::WHITE).stroke(Stroke::NONE)
+                                .corner_radius(egui::CornerRadius::same(7))
+                                .min_size(Vec2::new(ui.available_width(), 46.0));
+                            clicked = ui.add_enabled(!self.auth_busy, button).clicked();
+                            if self.auth_busy { ui.add_space(12.0); ui.spinner(); }
                         }
                         if !self.status.is_empty() {
                             ui.add_space(12.0);
                             ui.label(RichText::new(&self.status).size(10.0).color(Color32::from_rgb(235, 135, 135)));
                         }
                         ui.add_space(17.0);
-                        ui.label(RichText::new("AUTHENTIFICATION OFFICIELLE MICROSOFT")
+                        ui.label(RichText::new("CONNEXION MICROSOFT PAR CODE APPAREIL")
                             .size(8.0).color(Color32::from_gray(105)));
                     });
             });
         });
         if clicked {
             self.auth_busy = true;
-            self.status.clear();
+            self.auth_user_code = None;
+            self.auth_verification_uri = None;
+            self.status = "Préparation de la connexion Microsoft…".into();
             let tx = self.sender.clone();
-            thread::spawn(move || match auth::sign_in() {
-                Ok(profile) => { let _ = tx.send(Event::Authenticated(profile)); }
-                Err(error) => { let _ = tx.send(Event::AuthFailed(error)); }
+            thread::spawn(move || {
+                let result = (|| -> Result<auth::MinecraftProfile, String> {
+                    let (device, device_secret, expires_in) = auth::start_device_sign_in()?;
+                    let _ = tx.send(Event::DeviceCodeReady(device.user_code, device.verification_uri));
+                    auth::complete_device_sign_in(&device_secret, expires_in)
+                })();
+                match result {
+                    Ok(profile) => { let _ = tx.send(Event::Authenticated(profile)); }
+                    Err(error) => { let _ = tx.send(Event::AuthFailed(error)); }
+                }
             });
         }
     }
