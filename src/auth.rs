@@ -14,6 +14,7 @@ use std::{
 use url::Url;
 
 const CLIENT_ID: &str = "d53c2b5d-6674-4c80-9f3a-a9e5bd4fb0f7";
+const OAUTH_SCOPE: &str = "XboxLive.signin offline_access";
 const CREDENTIAL_SERVICE: &str = "MokyLauncher";
 const CREDENTIAL_USER: &str = "minecraft-refresh-token";
 
@@ -211,7 +212,7 @@ fn microsoft_access_token(client: &Client) -> Result<(String, String), Box<dyn E
         .append_pair("response_type", "code")
         .append_pair("redirect_uri", &redirect_uri)
         .append_pair("response_mode", "query")
-        .append_pair("scope", "XboxLive.signin offline_access")
+        .append_pair("scope", OAUTH_SCOPE)
         .append_pair("state", &state)
         .append_pair("code_challenge", &challenge)
         .append_pair("code_challenge_method", "S256");
@@ -227,7 +228,7 @@ fn microsoft_access_token(client: &Client) -> Result<(String, String), Box<dyn E
             ("code", &code),
             ("redirect_uri", &redirect_uri),
             ("code_verifier", &verifier),
-            ("scope", "XboxLive.signin offline_access"),
+            ("scope", OAUTH_SCOPE),
         ])
         .send()?
         .error_for_status()?
