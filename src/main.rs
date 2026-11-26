@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::{env, error::Error, io::Write, time::Duration};
+use std::{env, error::Error, io::Write, process::Command, time::Duration};
 
 const REPOSITORY: &str = "KuaFeur/moky-launcher";
 const ASSET_NAME: &str = "moky-launcher-windows-x86_64.exe";
@@ -72,9 +72,21 @@ fn main() {
 
     println!("Moky Launcher — Moky Studios");
 
-    if let Err(error) = check_for_updates() {
-        eprintln!("Impossible de vérifier les mises à jour : {error}");
-        eprintln!("Le launcher continue avec la version installée.");
+    match check_for_updates() {
+        Ok(true) => {
+            // Relance immédiatement la nouvelle version après le remplacement.
+            match env::current_exe().and_then(|executable| {
+                Command::new(executable).args(env::args_os().skip(1)).spawn()
+            }) {
+                Ok(_) => return,
+                Err(error) => eprintln!("Mise à jour installée, mais redémarrage impossible : {error}"),
+            }
+        }
+        Ok(false) => {}
+        Err(error) => {
+            eprintln!("Impossible de vérifier les mises à jour : {error}");
+            eprintln!("Le launcher continue avec la version installée.");
+        }
     }
 
     println!("Le launcher est prêt. Les fonctionnalités Minecraft arriveront ensuite.");
