@@ -2,6 +2,7 @@ use crate::auth::MinecraftProfile;
 use mc_launcher_core::prelude::*;
 use reqwest::blocking::Client;
 use serde::Deserialize;
+use sha2::{Digest, Sha512};
 use std::{
     error::Error,
     fs,
@@ -35,6 +36,11 @@ struct ModrinthFile {
     url: String,
     filename: String,
     primary: bool,
+    hashes: ModrinthHashes,
+}
+#[derive(Deserialize)]
+struct ModrinthHashes {
+    sha512: String,
 }
 
 fn game_directory() -> PathBuf {
@@ -113,11 +119,17 @@ fn download_sodium(client: &Client, mods_dir: &Path, minecraft_version: &str, re
     }
     report("Téléchargement de Sodium…".into());
     let mut response = client.get(&file.url).send()?.error_for_status()?;
-    let mut output = fs::File::create(&destination)?;
-    std::io::copy(&mut response, &mut output)?;
-    if !destination.is_file() || fs::metadata(&destination)?.len() == 0 {
-        return Err("Le téléchargement de Sodium est incomplet".into());
+    let mut temporary = tempfile::Builder::new().prefix("moky-sodium-").suffix(".jar").tempfile_in(mods_dir)?;
+    std::io::copy(&mut response, &mut temporary)?;
+    temporary.as_file_mut().sync_all()?;
+    let mut hasher = Sha512::new();
+    let mut input = fs::File::open(temporary.path())?;
+    std::io::copy(&mut input, &mut hasher)?;
+    let actual = format!("{:x}", hasher.finalize());
+    if !actual.eq_ignore_ascii_case(&file.hashes.sha512) {
+        return Err("La vérification SHA-512 de Sodium a échoué".into());
     }
+    temporary.persist(&destination)?;
     Ok(())
 }
 
