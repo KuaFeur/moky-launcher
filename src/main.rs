@@ -204,50 +204,29 @@ impl eframe::App for MokyApp {
 
 impl MokyApp {
     fn installer_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.label(RichText::new("Votre aventure").size(15.0).color(MUTED));
-        ui.label(RichText::new("commence ici.").size(34.0).strong().color(TEXT));
-        ui.add_space(10.0);
-        ui.label(RichText::new("Installez Moky Launcher et retrouvez tous vos serveurs Moky Studios au même endroit.")
-            .size(14.0).color(MUTED));
-        ui.add_space(26.0);
+        ui.add_space(42.0);
+        ui.label(RichText::new("MOKY STUDIOS").size(11.0).strong().color(MUTED));
+        ui.add_space(12.0);
+        ui.label(RichText::new("Moky Launcher").size(34.0).strong().color(TEXT));
+        ui.add_space(8.0);
+        ui.label(RichText::new("L’installer officiel de vos serveurs Minecraft.").size(14.0).color(MUTED));
+        ui.add_space(42.0);
 
-        panel(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui_material_icons::icons::ICON_DOWNLOAD);
-                ui.add_space(12.0);
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("Installation rapide").strong().color(TEXT));
-                    ui.label(RichText::new("Un seul clic, aucune configuration compliquée.").size(12.0).color(MUTED));
-                });
-            });
-            ui.add_space(16.0);
-            ui.horizontal(|ui| {
-                ui.label(egui_material_icons::icons::ICON_SYSTEM_UPDATE_ALT);
-                ui.add_space(12.0);
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("Toujours à jour").strong().color(TEXT));
-                    ui.label(RichText::new("Le launcher vérifie automatiquement les nouvelles versions.").size(12.0).color(MUTED));
-                });
-            });
-            ui.add_space(16.0);
-            ui.horizontal(|ui| {
-                ui.label(egui_material_icons::icons::ICON_APPS);
-                ui.add_space(12.0);
-                ui.vertical(|ui| {
-                    ui.label(RichText::new("Pensé pour Moky").strong().color(TEXT));
-                    ui.label(RichText::new("Tous les univers Moky Studios, réunis dans une seule application.").size(12.0).color(MUTED));
-                });
+        ui.horizontal(|ui| {
+            ui.label(egui_material_icons::icons::ICON_FOLDER);
+            ui.add_space(10.0);
+            ui.vertical(|ui| {
+                ui.label(RichText::new("Emplacement d’installation").size(12.0).strong().color(TEXT));
+                ui.label(RichText::new(self.install_path.display().to_string()).size(11.0).color(MUTED));
             });
         });
 
-        ui.add_space(20.0);
-        ui.label(RichText::new(format!("Emplacement : {}", self.install_path.display())).size(11.0).color(MUTED));
-        ui.add_space(10.0);
-        if primary_button(ui, "Installer Moky Launcher") {
+        ui.add_space(28.0);
+        if primary_button(ui, "Installer") {
             self.install(ctx);
         }
         if let Some(error) = &self.install_error {
-            ui.add_space(8.0);
+            ui.add_space(12.0);
             ui.label(RichText::new(format!("Échec de l’installation : {error}")).color(Color32::LIGHT_RED).size(12.0));
         }
     }
@@ -328,7 +307,9 @@ fn install_current_executable(destination: &Path) -> Result<(), Box<dyn Error + 
            $shortcut.Save(); \
          }}"
     );
+    use std::os::windows::process::CommandExt;
     let status = Command::new("powershell")
+        .creation_flags(0x08000000)
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
         .status()?;
     if !status.success() {
@@ -364,20 +345,6 @@ fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn E
     temporary_file.flush()?;
     self_replace::self_replace(temporary_file.path())?;
     Ok(Some(latest.to_string()))
-}
-
-fn logo(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(42.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, egui::CornerRadius::same(13), PURPLE_DARK);
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "M",
-        FontId::proportional(25.0), Color32::WHITE);
-}
-
-fn feature_icon(ui: &mut egui::Ui, symbol: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(38.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, egui::CornerRadius::same(11), Color32::from_rgb(48, 39, 72));
-    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, symbol,
-        FontId::proportional(18.0), PURPLE);
 }
 
 fn panel(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
