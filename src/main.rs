@@ -167,7 +167,8 @@ impl MokyApp {
                 }
                 Event::Failed(_error) => {
                     self.screen = Screen::Launcher;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(620.0, 650.0)));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0)));
+                    center_window(ctx, Vec2::new(1080.0, 720.0));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
                 },
                 Event::SessionRestored(profile) => { self.profile = profile; if self.profile.is_none() { self.screen = Screen::Auth; ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0)));
@@ -618,7 +619,16 @@ fn draw_voxel_backdrop(ui: &mut egui::Ui, rect: egui::Rect, darkness: f32) {
     }
 }
 
-fn center_window(ctx: &egui::Context, size: Vec2) {\n    let position = ctx.input(|input| input.viewport().monitor_size.map(|monitor| {\n        egui::pos2(((monitor.x - size.x) * 0.5).max(0.0), ((monitor.y - size.y) * 0.5).max(0.0))\n    }));\n    if let Some(position) = position {\n        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(position));\n    }\n}\n\nfn is_installed() -> bool {
+fn center_window(ctx: &egui::Context, size: Vec2) {
+    let position = ctx.input(|input| input.viewport().monitor_size.map(|monitor| {
+        egui::pos2(((monitor.x - size.x) * 0.5).max(0.0), ((monitor.y - size.y) * 0.5).max(0.0))
+    }));
+    if let Some(position) = position {
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(position));
+    }
+}
+
+fn is_installed() -> bool {
     let path = installation_path().join("MokyLauncher.exe");
     env::current_exe().ok().and_then(|p| p.canonicalize().ok())
         == path.canonicalize().ok()
