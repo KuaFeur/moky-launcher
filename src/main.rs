@@ -259,7 +259,7 @@ impl MokyApp {
             ui.add_space(8.0);
             ui.label(RichText::new("Moky Launcher prépare votre espace de jeu.").color(MUTED));
             ui.add_space(24.0);
-            ui.add(egui::ProgressBar::new(0.65).desired_width(360.0).fill(PURPLE).corner_radius(8.0));
+            ui.add(egui::ProgressBar::new(0.65).desired_width(360.0).fill(PURPLE).corner_radius(egui::CornerRadius::same(8)));
             ui.add_space(12.0);
             ui.label(RichText::new(&self.status).size(12.0).color(MUTED));
         });
@@ -366,14 +366,14 @@ fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn E
 
 fn logo(ui: &mut egui::Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(42.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 13.0, PURPLE_DARK);
+    ui.painter().rect_filled(rect, egui::CornerRadius::same(13), PURPLE_DARK);
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "M",
         FontId::proportional(25.0), Color32::WHITE);
 }
 
 fn feature_icon(ui: &mut egui::Ui, symbol: &str) {
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(38.0), egui::Sense::hover());
-    ui.painter().rect_filled(rect, 11.0, Color32::from_rgb(48, 39, 72));
+    ui.painter().rect_filled(rect, egui::CornerRadius::same(11), Color32::from_rgb(48, 39, 72));
     ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, symbol,
         FontId::proportional(18.0), PURPLE);
 }
@@ -382,7 +382,7 @@ fn panel(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
         .fill(PANEL)
         .stroke(Stroke::new(1.0, Color32::from_rgb(39, 42, 57)))
-        .corner_radius(16.0)
+        .corner_radius(egui::CornerRadius::same(16))
         .inner_margin(egui::Margin::same(18))
         .show(ui, add_contents);
 }
@@ -390,7 +390,7 @@ fn panel(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 fn pill(ui: &mut egui::Ui, text: &str, color: Color32) {
     egui::Frame::new()
         .fill(Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 28))
-        .corner_radius(20.0)
+        .corner_radius(egui::CornerRadius::same(20))
         .inner_margin(egui::Margin { left: 10, right: 10, top: 5, bottom: 5 })
         .show(ui, |ui| {
             ui.label(RichText::new(text).size(9.0).strong().color(color));
@@ -401,7 +401,7 @@ fn primary_button(ui: &mut egui::Ui, text: &str) -> bool {
     let button = egui::Button::new(RichText::new(text).size(14.0).strong().color(Color32::WHITE))
         .fill(PURPLE)
         .stroke(Stroke::NONE)
-        .corner_radius(12.0)
+        .corner_radius(egui::CornerRadius::same(12))
         .min_size(Vec2::new(ui.available_width(), 48.0));
     ui.add(button).clicked()
 }
