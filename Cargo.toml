@@ -17,6 +17,7 @@ rand = "0.8"
 sha2 = "0.10"
 url = "2"
 open = "5"
+qrcode = "0.14"
 keyring = "3"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 mc-launcher-core = "0.1.2"
