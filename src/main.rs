@@ -94,7 +94,7 @@ impl MokyApp {
             install_path,
             profile: None,
             session_checked: false,
-            startup_finished: skip_update,
+            startup_finished: false,
             auth_busy: false,
             startup_progress: 0.0,
             settings_open: false,
@@ -109,9 +109,7 @@ impl MokyApp {
                     Err(error) => { let _ = sender.send(Event::SessionRestoreFailed(error)); }
                 }
             });
-            if !skip_update {
-                app.start_update_check();
-            }
+            app.start_update_check();
         }
         app
     }
