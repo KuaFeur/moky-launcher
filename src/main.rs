@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use serde::Deserialize;
 use std::{
@@ -15,15 +17,15 @@ use std::{
 const REPOSITORY: &str = "KuaFeur/moky-launcher";
 const ASSET_NAME: &str = "MokyLauncher-Setup.exe";
 const APP_NAME: &str = "Moky Launcher";
-const BG: Color32 = Color32::from_rgb(12, 13, 20);
-const PANEL: Color32 = Color32::from_rgb(22, 24, 35);
-const PANEL_ALT: Color32 = Color32::from_rgb(29, 32, 46);
-const TEXT: Color32 = Color32::from_rgb(244, 245, 250);
-const MUTED: Color32 = Color32::from_rgb(151, 157, 176);
-const PURPLE: Color32 = Color32::from_rgb(155, 112, 255);
-const PURPLE_DARK: Color32 = Color32::from_rgb(93, 62, 175);
-const GREEN: Color32 = Color32::from_rgb(139, 218, 139);
-const ORANGE: Color32 = Color32::from_rgb(255, 190, 110);
+const BG: Color32 = Color32::BLACK;
+const PANEL: Color32 = Color32::from_rgb(10, 10, 10);
+const PANEL_ALT: Color32 = Color32::from_rgb(24, 24, 24);
+const TEXT: Color32 = Color32::WHITE;
+const MUTED: Color32 = Color32::from_rgb(165, 165, 165);
+const PURPLE: Color32 = Color32::WHITE;
+const PURPLE_DARK: Color32 = Color32::WHITE;
+const GREEN: Color32 = Color32::WHITE;
+const ORANGE: Color32 = Color32::from_rgb(190, 190, 190);
 
 #[derive(Deserialize)]
 struct Release {
@@ -173,14 +175,14 @@ impl eframe::App for MokyApp {
             .show(ctx, |ui| {
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
-                        logo(ui);
+                        ui.label(egui_material_icons::icons::ICON_APPS);
                         ui.add_space(12.0);
                         ui.vertical(|ui| {
                             ui.label(RichText::new("MOKY").font(FontId::proportional(17.0)).strong().color(TEXT));
-                            ui.label(RichText::new("STUDIOS").font(FontId::proportional(10.0)).strong().color(PURPLE));
+                            ui.label(RichText::new("STUDIOS").font(FontId::proportional(10.0)).strong().color(TEXT));
                         });
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            pill(ui, "OFFICIAL", PURPLE);
+                            pill(ui, "OFFICIAL", Color32::WHITE);
                         });
                     });
 
@@ -211,7 +213,7 @@ impl MokyApp {
 
         panel(ui, |ui| {
             ui.horizontal(|ui| {
-                feature_icon(ui, "↗");
+                ui.label(egui_material_icons::icons::ICON_DOWNLOAD);
                 ui.add_space(12.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new("Installation rapide").strong().color(TEXT));
@@ -220,7 +222,7 @@ impl MokyApp {
             });
             ui.add_space(16.0);
             ui.horizontal(|ui| {
-                feature_icon(ui, "⟳");
+                ui.label(egui_material_icons::icons::ICON_SYSTEM_UPDATE_ALT);
                 ui.add_space(12.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new("Toujours à jour").strong().color(TEXT));
@@ -229,7 +231,7 @@ impl MokyApp {
             });
             ui.add_space(16.0);
             ui.horizontal(|ui| {
-                feature_icon(ui, "◆");
+                ui.label(egui_material_icons::icons::ICON_APPS);
                 ui.add_space(12.0);
                 ui.vertical(|ui| {
                     ui.label(RichText::new("Pensé pour Moky").strong().color(TEXT));
@@ -381,7 +383,7 @@ fn feature_icon(ui: &mut egui::Ui, symbol: &str) {
 fn panel(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
         .fill(PANEL)
-        .stroke(Stroke::new(1.0, Color32::from_rgb(39, 42, 57)))
+        .stroke(Stroke::new(1.0, Color32::from_rgb(48, 48, 48)))
         .corner_radius(egui::CornerRadius::same(16))
         .inner_margin(egui::Margin::same(18))
         .show(ui, add_contents);
@@ -389,17 +391,17 @@ fn panel(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 
 fn pill(ui: &mut egui::Ui, text: &str, color: Color32) {
     egui::Frame::new()
-        .fill(Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 28))
+        .fill(Color32::from_rgb(35, 35, 35))
         .corner_radius(egui::CornerRadius::same(20))
         .inner_margin(egui::Margin { left: 10, right: 10, top: 5, bottom: 5 })
         .show(ui, |ui| {
-            ui.label(RichText::new(text).size(9.0).strong().color(color));
+            ui.label(RichText::new(text).size(9.0).strong().color(Color32::WHITE));
         });
 }
 
 fn primary_button(ui: &mut egui::Ui, text: &str) -> bool {
-    let button = egui::Button::new(RichText::new(text).size(14.0).strong().color(Color32::WHITE))
-        .fill(PURPLE)
+    let button = egui::Button::new(RichText::new(text).size(14.0).strong().color(Color32::BLACK))
+        .fill(Color32::WHITE)
         .stroke(Stroke::NONE)
         .corner_radius(egui::CornerRadius::same(12))
         .min_size(Vec2::new(ui.available_width(), 48.0));
@@ -425,6 +427,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "Moky Launcher",
         options,
-        Box::new(|_cc| Ok(Box::new(MokyApp::new()))),
+        Box::new(|cc| { egui_material_icons::initialize(&cc.egui_ctx); Ok(Box::new(MokyApp::new())) }),
     )
 }
