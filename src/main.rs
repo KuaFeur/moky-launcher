@@ -464,7 +464,7 @@ impl MokyApp {
                         }
                         if !self.status.is_empty() {
                             ui.add_space(12.0);
-                            ui.label(RichText::new(&self.status).size(10.0).color(Color32::from_rgb(235, 135, 135)));
+                            ui.label(RichText::new(&self.status).size(10.0).color(if self.auth_user_code.is_some() { MUTED } else { Color32::from_rgb(235, 135, 135) }));
                         }
                         ui.add_space(17.0);
                         ui.label(RichText::new("CONNEXION MICROSOFT PAR CODE APPAREIL")
