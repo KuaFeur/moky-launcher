@@ -1,4 +1,4 @@
-name: Build Moky Launcher
+name: Build Moky Launcher Installer
 
 on:
   push:
@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build-windows:
-    name: Build Windows x64
+    name: Build Windows installer
     runs-on: windows-latest
 
     steps:
@@ -22,18 +22,18 @@ jobs:
       - name: Install stable Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build release executable
+      - name: Build installer
         run: cargo build --release
 
-      - name: Rename executable
+      - name: Rename installer
         shell: pwsh
-        run: Copy-Item target/release/moky-launcher.exe moky-launcher-windows-x86_64.exe
+        run: Copy-Item target/release/moky-launcher.exe MokyLauncher-Setup.exe
 
-      - name: Upload CI artifact
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: moky-launcher-windows-x86_64
-          path: moky-launcher-windows-x86_64.exe
+          name: MokyLauncher-Setup
+          path: MokyLauncher-Setup.exe
           if-no-files-found: error
           retention-days: 30
 
@@ -42,4 +42,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: moky-launcher-windows-x86_64.exe
+          files: MokyLauncher-Setup.exe
