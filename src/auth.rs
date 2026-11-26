@@ -1,16 +1,10 @@
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use rand::RngCore;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::{
     error::Error,
-    io::{Read, Write},
-    net::TcpListener,
     thread,
-    time::{Duration, Instant},
+    time::Duration,
 };
-use url::Url;
 
 const CLIENT_ID: &str = "d53c2b5d-6674-4c80-9f3a-a9e5bd4fb0f7";
 const OAUTH_SCOPE: &str = "XboxLive.signin offline_access";
@@ -29,6 +23,29 @@ pub struct MinecraftProfile {
 struct OAuthToken {
     access_token: String,
     refresh_token: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DeviceCode {
+    pub user_code: String,
+    pub verification_uri: String,
+    pub message: String,
+}
+
+#[derive(Deserialize)]
+struct DeviceCodeResponse {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: Option<u64>,
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct DeviceTokenError {
+    error: Option<String>,
+    error_description: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -143,104 +160,66 @@ fn ensure_minecraft_response(
     Ok(response.error_for_status()?)
 }
 
-fn random_url_token() -> String {
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    URL_SAFE_NO_PAD.encode(bytes)
-}
-
-fn open_browser(url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
-    open::that(url)?;
-    Ok(())
-}
-
-fn receive_authorization_code(listener: TcpListener, expected_state: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
-    listener.set_nonblocking(true)?;
-    let deadline = Instant::now() + Duration::from_secs(75);
-    loop {
-        if Instant::now() > deadline {
-            return Err("La connexion Microsoft a expiré. Réessayez.".into());
-        }
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                let mut buffer = [0u8; 8192];
-                let count = stream.read(&mut buffer)?;
-                let request = String::from_utf8_lossy(&buffer[..count]);
-                let first_line = request.lines().next().unwrap_or_default();
-                let path = first_line.split_whitespace().nth(1).unwrap_or("/");
-                let callback = Url::parse(&format!("http://localhost{path}"))?;
-                let params: std::collections::HashMap<String, String> =
-                    callback.query_pairs().into_owned().collect();
-
-                let body;
-                let result = if let Some(error) = params.get("error") {
-                    body = format!("<h2>Connexion impossible</h2><p>{}</p><p>Vous pouvez fermer cette fenêtre.</p>", error);
-                    Err(format!("Microsoft a refusé la connexion : {error}"))
-                } else if params.get("state").map(String::as_str) != Some(expected_state) {
-                    body = "<h2>Connexion non vérifiée</h2><p>La réponse de sécurité ne correspond pas.</p>".to_string();
-                    Err("La vérification de sécurité OAuth a échoué.".to_string())
-                } else if let Some(code) = params.get("code") {
-                    body = "<h2>Connexion réussie</h2><p>Vous pouvez fermer cette fenêtre et revenir dans Moky Launcher.</p>".to_string();
-                    Ok(code.clone())
-                } else {
-                    body = "<h2>Réponse invalide</h2><p>Vous pouvez fermer cette fenêtre.</p>".to_string();
-                    Err("Microsoft n'a renvoyé aucun code d'autorisation.".to_string())
-                };
-
-                let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
-                    body.len(), body
-                );
-                let _ = stream.write_all(response.as_bytes());
-                let _ = stream.flush();
-                return result.map_err(|e| -> Box<dyn Error + Send + Sync> { e.into() });
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(150));
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-}
-
-fn microsoft_access_token(client: &Client) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
-    let listener = TcpListener::bind(("127.0.0.1", 0))?;
-    let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://localhost:{port}");
-    let state = random_url_token();
-    let verifier = random_url_token();
-    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-
-    let mut authorize = Url::parse("https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize")?;
-    authorize.query_pairs_mut()
-        .append_pair("client_id", CLIENT_ID)
-        .append_pair("response_type", "code")
-        .append_pair("redirect_uri", &redirect_uri)
-        .append_pair("response_mode", "query")
-        .append_pair("scope", OAUTH_SCOPE)
-        .append_pair("state", &state)
-        .append_pair("code_challenge", &challenge)
-        .append_pair("code_challenge_method", "S256");
-
-    open_browser(authorize.as_str())?;
-    let code = receive_authorization_code(listener, &state)?;
-
-    let token: OAuthToken = client
-        .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
-        .form(&[
-            ("client_id", CLIENT_ID),
-            ("grant_type", "authorization_code"),
-            ("code", &code),
-            ("redirect_uri", &redirect_uri),
-            ("code_verifier", &verifier),
-            ("scope", OAUTH_SCOPE),
-        ])
+pub fn begin_device_code(client: &Client) -> Result<(DeviceCode, String, u64), Box<dyn Error + Send + Sync>> {
+    let response: DeviceCodeResponse = client
+        .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode")
+        .form(&[("client_id", CLIENT_ID), ("scope", OAUTH_SCOPE)])
         .send()?
         .error_for_status()?
         .json()?;
+    let display = DeviceCode {
+        user_code: response.user_code,
+        verification_uri: response.verification_uri,
+        message: response.message,
+    };
+    Ok((display, response.device_code, response.expires_in.max(1)))
+}
 
-    let refresh = token.refresh_token.ok_or("Microsoft n'a pas fourni de jeton de renouvellement.")?;
-    Ok((token.access_token, refresh))
+fn poll_device_code(
+    client: &Client,
+    device_code: &str,
+    expires_in: u64,
+) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(expires_in);
+    let mut interval = Duration::from_secs(5);
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err("Le code de connexion Microsoft a expiré. Relancez la connexion.".into());
+        }
+        thread::sleep(interval);
+        let response = client
+            .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/token")
+            .form(&[
+                ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+                ("client_id", CLIENT_ID),
+                ("device_code", device_code),
+            ])
+            .send()?;
+        if response.status().is_success() {
+            let token: OAuthToken = response.json()?;
+            let refresh = token.refresh_token.ok_or("Microsoft n'a pas fourni de jeton de renouvellement.")?;
+            return Ok((token.access_token, refresh));
+        }
+        let status = response.status();
+        let error: DeviceTokenError = response.json().unwrap_or(DeviceTokenError {
+            error: None,
+            error_description: None,
+        });
+        match error.error.as_deref() {
+            Some("authorization_pending") => continue,
+            Some("slow_down") => {
+                interval += Duration::from_secs(5);
+                continue;
+            }
+            Some("authorization_declined") => return Err("La connexion Microsoft a été refusée.".into()),
+            Some("expired_token") => return Err("Le code de connexion Microsoft a expiré. Relancez la connexion.".into()),
+            Some("bad_verification_code") => return Err("Microsoft a rejeté le code de connexion.".into()),
+            _ => return Err(format!(
+                "Échec de la connexion Microsoft (HTTP {status}) : {}",
+                error.error_description.unwrap_or_else(|| "réponse inconnue".into())
+            ).into()),
+        }
+    }
 }
 
 fn refresh_microsoft_token(client: &Client, refresh: &str) -> Result<(String, String), Box<dyn Error + Send + Sync>> {
@@ -345,9 +324,13 @@ fn store_refresh_token(token: &str) -> Result<(), Box<dyn Error + Send + Sync>> 
 }
 
 pub fn sign_in() -> Result<MinecraftProfile, String> {
+    Err("Utilisez le flux Device Code pour démarrer la connexion Microsoft.".into())
+}
+
+pub fn complete_device_sign_in(device_code: &str, expires_in: u64) -> Result<MinecraftProfile, String> {
     let result = (|| -> Result<MinecraftProfile, Box<dyn Error + Send + Sync>> {
         let client = http_client()?;
-        let (microsoft_token, refresh_token) = microsoft_access_token(&client)?;
+        let (microsoft_token, refresh_token) = poll_device_code(&client, device_code, expires_in)?;
         let profile = minecraft_profile(&client, &microsoft_token)?;
         store_refresh_token(&refresh_token)?;
         Ok(profile)
@@ -355,10 +338,8 @@ pub fn sign_in() -> Result<MinecraftProfile, String> {
     result.map_err(|error| {
         let message = error.to_string();
         if message.contains("403") || message.to_lowercase().contains("invalid app registration") {
-            format!("{message}\n\nMicrosoft doit autoriser le Client ID de Moky Launcher à utiliser Minecraft Services. L'inscription Entra seule ne suffit pas.")
-        } else {
-            message
-        }
+            format!("{message}\\n\\nMicrosoft doit autoriser le Client ID de Moky Launcher à utiliser Minecraft Services. Le Device Code ne contourne pas cette autorisation.")
+        } else { message }
     })
 }
 
