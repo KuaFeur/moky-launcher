@@ -1,6 +1,7 @@
 #![windows_subsystem = "windows"]
 
 mod auth;
+mod game;
 
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use serde::Deserialize;
@@ -51,6 +52,9 @@ enum Event {
     AuthFailed(String),
     DownloadProgress(String, f32),
     JavaProgress(String, f32),
+    GameStatus(String),
+    GameFailed(String),
+    GameStarted,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -77,6 +81,7 @@ struct MokyApp {
     startup_progress: f32,
     settings_open: bool,
     servers_open: bool,
+    game_busy: bool,
 }
 
 impl MokyApp {
@@ -101,6 +106,7 @@ impl MokyApp {
             startup_progress: 0.0,
             settings_open: false,
             servers_open: false,
+            game_busy: false,
         };
 
         if installed {
@@ -221,6 +227,9 @@ impl MokyApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
                 },
                 Event::AuthFailed(error) => { self.auth_busy = false; self.status = error; self.screen = Screen::Auth; },
+                Event::GameStatus(status) => { self.status = status; },
+                Event::GameFailed(error) => { self.game_busy = false; self.status = error; },
+                Event::GameStarted => { self.game_busy = false; self.status = "Minecraft est lancé".into(); },
             }
             ctx.request_repaint();
         }
@@ -534,8 +543,30 @@ impl MokyApp {
                     .fill(Color32::WHITE).stroke(Stroke::NONE)
                     .corner_radius(egui::CornerRadius::same(7))
                     .min_size(Vec2::new(224.0,60.0));
-                if ui.add(play).clicked() {
+                let play_label = if self.game_busy { "PRÉPARATION…" } else { "▶   JOUER" };
+                let play = egui::Button::new(RichText::new(play_label).size(15.0).strong().color(Color32::BLACK))
+                    .fill(Color32::WHITE).stroke(Stroke::NONE)
+                    .corner_radius(egui::CornerRadius::same(7))
+                    .min_size(Vec2::new(224.0,60.0));
+                if ui.add_enabled(!self.game_busy, play).clicked() {
+                    self.game_busy = true;
                     self.status = "Préparation de Minecraft…".into();
+                    let tx = self.sender.clone();
+                    let profile = profile.clone();
+                    thread::spawn(move || {
+                        let status_tx = tx.clone();
+                        let result = game::launch_minecraft(profile, move |status| {
+                            let _ = status_tx.send(Event::GameStatus(status));
+                        });
+                        match result {
+                            Ok(()) => { let _ = tx.send(Event::GameStarted); }
+                            Err(error) => { let _ = tx.send(Event::GameFailed(error)); }
+                        }
+                    });
+                }
+                if !self.status.is_empty() {
+                    ui.add_space(10.0);
+                    ui.label(RichText::new(&self.status).size(10.0).color(MUTED));
                 }
                 ui.add_space(58.0);
                 ui.horizontal(|ui| {
