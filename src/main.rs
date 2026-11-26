@@ -93,10 +93,13 @@ impl MokyApp {
         self.status = "Préparation de l’installation…".into();
         self.install_error = None;
         let destination = self.install_path.join("MokyLauncher.exe");
+        let marker = self.install_path.join("MokyLauncher.installed");
+        let _ = fs::remove_file(&marker);
         let ctx = ctx.clone();
 
         thread::spawn(move || {
-            let result = install_current_executable(&destination);
+            let result = install_current_executable(&destination)
+                .and_then(|_| fs::write(&marker, "installed").map_err(Into::into));
             ctx.request_repaint();
             if let Err(error) = result {
                 let _ = fs::write(
@@ -145,7 +148,7 @@ impl MokyApp {
                 self.install_error = fs::read_to_string(&error_file).ok();
                 let _ = fs::remove_file(error_file);
                 self.screen = Screen::Installer;
-            } else if self.install_path.join("MokyLauncher.exe").exists() {
+            } else if self.install_path.join("MokyLauncher.installed").exists() {
                 self.status = "Installation terminée !".into();
                 self.screen = Screen::Launcher;
                 if let Ok(exe) = env::current_exe() {
@@ -250,7 +253,7 @@ impl MokyApp {
     fn installing_ui(&mut self, ui: &mut egui::Ui) {
         ui.add_space(60.0);
         ui.vertical_centered(|ui| {
-            spinner(ui);
+            ui.spinner();
             ui.add_space(22.0);
             ui.label(RichText::new("Installation en cours…").size(26.0).strong().color(TEXT));
             ui.add_space(8.0);
@@ -403,18 +406,6 @@ fn primary_button(ui: &mut egui::Ui, text: &str) -> bool {
     ui.add(button).clicked()
 }
 
-fn spinner(ui: &mut egui::Ui) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::splat(42.0), egui::Sense::hover());
-    let center = rect.center();
-    ui.painter().circle_stroke(center, 16.0, Stroke::new(3.0, PANEL_ALT));
-    ui.painter().arc(
-        center,
-        16.0,
-        0.0,
-        4.2,
-        Stroke::new(3.0, PURPLE),
-    );
-}
 
 fn main() -> eframe::Result<()> {
     if env::args().any(|arg| arg == "--version") {
