@@ -160,7 +160,7 @@ fn ensure_minecraft_response(
     Ok(response.error_for_status()?)
 }
 
-pub fn begin_device_code(client: &Client) -> Result<(DeviceCode, String, u64), Box<dyn Error + Send + Sync>> {
+fn begin_device_code(client: &Client) -> Result<(DeviceCode, String, u64), Box<dyn Error + Send + Sync>> {
     let response: DeviceCodeResponse = client
         .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode")
         .form(&[("client_id", CLIENT_ID), ("scope", OAUTH_SCOPE)])
@@ -173,6 +173,11 @@ pub fn begin_device_code(client: &Client) -> Result<(DeviceCode, String, u64), B
         message: response.message,
     };
     Ok((display, response.device_code, response.expires_in.max(1)))
+}
+
+pub fn start_device_sign_in() -> Result<(DeviceCode, String, u64), String> {
+    let client = http_client().map_err(|e| e.to_string())?;
+    begin_device_code(&client).map_err(|e| e.to_string())
 }
 
 fn poll_device_code(
@@ -321,10 +326,6 @@ fn store_refresh_token(token: &str) -> Result<(), Box<dyn Error + Send + Sync>> 
     let entry = keyring::Entry::new(CREDENTIAL_SERVICE, CREDENTIAL_USER)?;
     entry.set_password(token)?;
     Ok(())
-}
-
-pub fn sign_in() -> Result<MinecraftProfile, String> {
-    Err("Utilisez le flux Device Code pour démarrer la connexion Microsoft.".into())
 }
 
 pub fn complete_device_sign_in(device_code: &str, expires_in: u64) -> Result<MinecraftProfile, String> {
