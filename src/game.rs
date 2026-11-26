@@ -118,8 +118,19 @@ fn download_sodium(client: &Client, mods_dir: &Path, minecraft_version: &str, re
         .ok_or("Le paquet Sodium ne contient aucun fichier")?;
     let destination = mods_dir.join(&file.filename);
     if destination.is_file() {
-        report("Sodium est déjà installé".into());
-        return Ok(());
+        let mut existing = fs::File::open(&destination)?;
+        let mut hasher = Sha512::new();
+        let mut buffer = [0u8; 64 * 1024];
+        loop {
+            let count = existing.read(&mut buffer)?;
+            if count == 0 { break; }
+            hasher.update(&buffer[..count]);
+        }
+        if format!("{:x}", hasher.finalize()).eq_ignore_ascii_case(&file.hashes.sha512) {
+            report("Sodium est déjà installé".into());
+            return Ok(());
+        }
+        fs::remove_file(&destination)?;
     }
     report("Téléchargement de Sodium…".into());
     let mut response = client.get(&file.url).send()?.error_for_status()?;
@@ -138,6 +149,13 @@ fn download_sodium(client: &Client, mods_dir: &Path, minecraft_version: &str, re
     if !actual.eq_ignore_ascii_case(&file.hashes.sha512) {
         return Err("La vérification SHA-512 de Sodium a échoué".into());
     }
+    for entry in fs::read_dir(mods_dir)? {
+        let path = entry?.path();
+        if path != destination && path.file_name().and_then(|name| name.to_str())
+            .map(|name| name.starts_with("sodium") && name.ends_with(".jar")).unwrap_or(false) {
+            let _ = fs::remove_file(path);
+        }
+    }
     temporary.persist(&destination)?;
     Ok(())
 }
@@ -147,6 +165,12 @@ pub fn launch_minecraft(
     report: impl Fn(String) + Send + 'static,
 ) -> Result<(), String> {
     let result = (|| -> Result<(), Box<dyn Error + Send + Sync>> {
+        let fresh_profile = crate::auth::restore_session()?
+            .ok_or("La session Microsoft n'est plus disponible. Reconnectez-vous.")?;
+        if fresh_profile.id != profile.id {
+            return Err("Le compte Microsoft actif a changé. Reconnectez-vous.".into());
+        }
+        let profile = fresh_profile;
         let client = Client::builder()
             .user_agent("MokyLauncher/0.1")
             .timeout(Duration::from_secs(90))
