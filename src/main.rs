@@ -84,6 +84,7 @@ struct MokyApp {
     servers_open: bool,
     game_busy: bool,
     skin_texture: Option<egui::TextureHandle>,
+    background_texture: Option<egui::TextureHandle>,
 }
 
 impl MokyApp {
@@ -108,6 +109,7 @@ impl MokyApp {
             servers_open: false,
             game_busy: false,
             skin_texture: None,
+            background_texture: None,
         };
 
         if installed {
@@ -285,6 +287,17 @@ impl MokyApp {
 impl eframe::App for MokyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_events(ctx);
+        if self.background_texture.is_none() {
+            let bytes = include_bytes!("../assets/moky-background.webp");
+            if let Ok(decoded) = image::load_from_memory(bytes) {
+                let rgba = decoded.to_rgba8();
+                let size = [rgba.width() as usize, rgba.height() as usize];
+                let image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+                self.background_texture = Some(ctx.load_texture(
+                    "moky-background", image, egui::TextureOptions::LINEAR,
+                ));
+            }
+        }
         ctx.request_repaint_after(Duration::from_millis(180));
 
         egui::CentralPanel::default()
@@ -495,7 +508,11 @@ impl MokyApp {
         let profile = self.profile.clone().unwrap();
         let mut logout = false;
         let rect = ui.max_rect();
-        draw_voxel_backdrop(ui, rect, 0.18);
+        if let Some(texture) = &self.background_texture {
+            draw_scene_backdrop(ui, rect, texture);
+        } else {
+            draw_voxel_backdrop(ui, rect, 0.18);
+        }
 
         // A single Paladium-like launcher surface: skin/account at top-left,
         // server picker in the left column, and the selected game in the hero.
@@ -665,6 +682,27 @@ fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
         .corner_radius(egui::CornerRadius::same(6))
         .min_size(Vec2::new(ui.available_width(), 36.0));
     ui.add(button).clicked()
+}
+
+fn draw_scene_backdrop(ui: &mut egui::Ui, rect: egui::Rect, texture: &egui::TextureHandle) {
+    let painter = ui.painter();
+    painter.image(
+        texture.id(),
+        rect,
+        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+        Color32::WHITE,
+    );
+    painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(0, 0, 0, 62));
+    for step in 0..18 {
+        let t = step as f32 / 18.0;
+        let top = rect.top() + rect.height() * (0.56 + t * 0.44);
+        let alpha = (42.0 + t * 145.0) as u8;
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(rect.left(), top), rect.right_bottom()),
+            0.0,
+            Color32::from_rgba_unmultiplied(0, 0, 0, alpha),
+        );
+    }
 }
 
 fn draw_voxel_backdrop(ui: &mut egui::Ui, rect: egui::Rect, darkness: f32) {
