@@ -23,6 +23,7 @@ pub struct MinecraftProfile {
     pub id: String,
     pub name: String,
     pub skin_url: Option<String>,
+    pub access_token: String,
 }
 
 #[derive(Deserialize)]
@@ -151,7 +152,7 @@ fn open_browser(url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 fn receive_authorization_code(listener: TcpListener, expected_state: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
     listener.set_nonblocking(true)?;
-    let deadline = Instant::now() + Duration::from_secs(240);
+    let deadline = Instant::now() + Duration::from_secs(75);
     loop {
         if Instant::now() > deadline {
             return Err("La connexion Microsoft a expiré. Réessayez.".into());
@@ -329,6 +330,7 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         id: profile.id,
         name: profile.name,
         skin_url,
+        access_token: minecraft.access_token,
     })
 }
 
