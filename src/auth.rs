@@ -29,6 +29,7 @@ struct OAuthToken {
 pub struct DeviceCode {
     pub user_code: String,
     pub verification_uri: String,
+    pub verification_uri_complete: Option<String>,
     pub message: String,
 }
 
@@ -37,6 +38,7 @@ struct DeviceCodeResponse {
     device_code: String,
     user_code: String,
     verification_uri: String,
+    verification_uri_complete: Option<String>,
     expires_in: u64,
     interval: Option<u64>,
     message: String,
@@ -170,6 +172,7 @@ fn begin_device_code(client: &Client) -> Result<(DeviceCode, String, u64), Box<d
     let display = DeviceCode {
         user_code: response.user_code,
         verification_uri: response.verification_uri,
+        verification_uri_complete: response.verification_uri_complete,
         message: response.message,
     };
     Ok((display, response.device_code, response.expires_in.max(1)))
