@@ -4,6 +4,7 @@ mod auth;
 
 use eframe::egui::{self, Align, Color32, FontId, Layout, RichText, Stroke, Vec2};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::{
     env,
     error::Error,
@@ -49,6 +50,7 @@ enum Event {
     Authenticated(auth::MinecraftProfile),
     AuthFailed(String),
     DownloadProgress(String, f32),
+    JavaProgress(String, f32),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -147,12 +149,24 @@ impl MokyApp {
         let sender = self.sender.clone();
         thread::spawn(move || {
             let _ = sender.send(Event::Checking);
-            match check_for_updates(&sender) {
-                Ok(Some(version)) => { let _ = sender.send(Event::Updated(version)); }
-                Ok(None) => {
+            let skip_update = env::args().any(|arg| arg == "--launch");
+            if !skip_update {
+                match check_for_updates(&sender) {
+                    Ok(Some(version)) => { let _ = sender.send(Event::Updated(version)); return; }
+                    Ok(None) => {}
+                    Err(error) => {
+                        let _ = sender.send(Event::JavaProgress(
+                            format!("Vérification de Java… (mise à jour du launcher ignorée : {error})"), 0.0
+                        ));
+                    }
+                }
+            }
+            match ensure_java_runtime(&sender) {
+                Ok(version) => {
+                    let _ = sender.send(Event::JavaProgress(format!("Java {version} est prêt"), 1.0));
                     let _ = sender.send(Event::UpToDate(env!("CARGO_PKG_VERSION").into()));
                 }
-                Err(error) => { let _ = sender.send(Event::Failed(error.to_string())); }
+                Err(error) => { let _ = sender.send(Event::Failed(format!("Préparation de Java impossible : {error}"))); }
             }
         });
     }
@@ -167,6 +181,10 @@ impl MokyApp {
                     self.startup_finished = true;
                     if self.session_checked { self.open_session_screen(ctx); }
                 }
+                Event::JavaProgress(status, progress) => {
+                    self.status = status;
+                    self.startup_progress = progress;
+                },
                 Event::DownloadProgress(version, progress) => {
                     self.status = format!("Téléchargement de la version {version}…");
                     self.startup_progress = progress;
@@ -812,6 +830,81 @@ fn install_current_executable(destination: &Path) -> Result<(), Box<dyn Error + 
         return Err("Impossible de créer les raccourcis Windows".into());
     }
     Ok(())
+}
+
+
+#[derive(Deserialize)]
+struct AdoptiumAsset { version: AdoptiumVersion, binary: AdoptiumBinary }
+#[derive(Deserialize)]
+struct AdoptiumVersion { semver: String }
+#[derive(Deserialize)]
+struct AdoptiumBinary { package: AdoptiumPackage }
+#[derive(Deserialize)]
+struct AdoptiumPackage { link: String, checksum: String }
+
+fn java_runtime_path() -> PathBuf {
+    env::var_os("LOCALAPPDATA").map(PathBuf::from).unwrap_or_else(env::temp_dir)
+        .join("Moky Studios").join("runtime").join("java-25")
+}
+
+fn ensure_java_runtime(sender: &Sender<Event>) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let client = reqwest::blocking::Client::builder().user_agent("MokyLauncher-JavaRuntime")
+        .timeout(Duration::from_secs(90)).build()?;
+    let _ = sender.send(Event::JavaProgress("Recherche de la dernière version de Java 25…".into(), 0.02));
+    let assets: Vec<AdoptiumAsset> = client.get(
+        "https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jre&os=windows&vendor=eclipse"
+    ).send()?.error_for_status()?.json()?;
+    let asset = assets.into_iter().next().ok_or("Aucune distribution Java 25 Windows x64 n'est disponible")?;
+    let version = asset.version.semver;
+    let runtime = java_runtime_path();
+    let marker = runtime.join(".adoptium-version");
+    if runtime.join("bin").join("javaw.exe").is_file()
+        && fs::read_to_string(&marker).ok().as_deref() == Some(version.as_str()) {
+        let _ = sender.send(Event::JavaProgress(format!("Java {version} est déjà à jour"), 1.0));
+        return Ok(version);
+    }
+    let _ = sender.send(Event::JavaProgress(format!("Téléchargement de Java {version}…"), 0.05));
+    let mut response = client.get(&asset.binary.package.link).send()?.error_for_status()?;
+    let total = response.content_length().unwrap_or(0);
+    let mut file = tempfile::Builder::new().prefix("moky-java-").suffix(".zip").tempfile()?;
+    let mut hasher = Sha256::new();
+    let mut downloaded = 0u64;
+    let mut buffer = [0u8; 128 * 1024];
+    loop {
+        let count = response.read(&mut buffer)?;
+        if count == 0 { break; }
+        file.write_all(&buffer[..count])?;
+        hasher.update(&buffer[..count]);
+        downloaded += count as u64;
+        let progress = if total > 0 { downloaded as f32 / total as f32 } else { 0.0 };
+        let _ = sender.send(Event::JavaProgress(format!("Téléchargement de Java {version}…"),
+            0.05 + progress.clamp(0.0, 1.0) * 0.65));
+    }
+    if !format!("{:x}", hasher.finalize()).eq_ignore_ascii_case(&asset.binary.package.checksum) {
+        return Err("La vérification SHA-256 de l'archive Java a échoué".into());
+    }
+    let _ = sender.send(Event::JavaProgress("Installation de l'environnement Java…".into(), 0.74));
+    let staging = tempfile::Builder::new().prefix("moky-java-extract-").tempdir()?;
+    file.as_file_mut().sync_all()?;
+    let mut archive = zip::ZipArchive::new(file.reopen()?)?;
+    archive.extract(staging.path())?;
+    let java_home = find_java_home(staging.path()).ok_or("L'archive Java ne contient pas bin/javaw.exe")?;
+    if runtime.exists() { fs::remove_dir_all(&runtime)?; }
+    if let Some(parent) = runtime.parent() { fs::create_dir_all(parent)?; }
+    fs::rename(java_home, &runtime)?;
+    fs::write(&marker, &version)?;
+    if !runtime.join("bin").join("javaw.exe").is_file() { return Err("L'installation de Java est incomplète".into()); }
+    let _ = sender.send(Event::JavaProgress(format!("Java {version} installé"), 0.98));
+    Ok(version)
+}
+
+fn find_java_home(root: &Path) -> Option<PathBuf> {
+    if root.join("bin").join("javaw.exe").is_file() { return Some(root.to_path_buf()); }
+    for entry in fs::read_dir(root).ok()? {
+        let path = entry.ok()?.path();
+        if path.is_dir() { if let Some(found) = find_java_home(&path) { return Some(found); } }
+    }
+    None
 }
 
 fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn Error + Send + Sync>> {
