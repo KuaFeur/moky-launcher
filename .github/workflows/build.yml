@@ -69,5 +69,3 @@ jobs:
           files: |
             MokyLauncher-Setup.exe
             MokyLauncher.exe
-            MokyLauncher-Setup.exe
-            MokyLauncher.exe
