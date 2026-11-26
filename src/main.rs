@@ -45,6 +45,7 @@ enum Event {
     Updated(String),
     Failed(String),
     SessionRestored(Option<auth::MinecraftProfile>),
+    SessionRestoreFailed(String),
     Authenticated(auth::MinecraftProfile),
     AuthFailed(String),
     DownloadProgress(String, f32),
@@ -68,6 +69,8 @@ struct MokyApp {
     install_error: Option<String>,
     install_path: PathBuf,
     profile: Option<auth::MinecraftProfile>,
+    session_checked: bool,
+    startup_finished: bool,
     auth_busy: bool,
     startup_progress: f32,
     settings_open: bool,
@@ -82,7 +85,7 @@ impl MokyApp {
 
         let (sender, receiver) = mpsc::channel();
         let mut app = Self {
-            screen: if !installed { Screen::Installer } else if skip_update { Screen::Launcher } else { Screen::Startup },
+            screen: if !installed { Screen::Installer } else { Screen::Startup },
             status: if installed { "Recherche des mises à jour…".into() } else { "Prêt à installer".into() },
             version: env!("CARGO_PKG_VERSION").into(),
             receiver,
@@ -90,6 +93,8 @@ impl MokyApp {
             install_error: None,
             install_path,
             profile: None,
+            session_checked: false,
+            startup_finished: skip_update,
             auth_busy: false,
             startup_progress: 0.0,
             settings_open: false,
@@ -99,14 +104,23 @@ impl MokyApp {
         if installed {
             let sender = app.sender.clone();
             thread::spawn(move || {
-                let result = auth::restore_session().unwrap_or(None);
-                let _ = sender.send(Event::SessionRestored(result));
+                match auth::restore_session() {
+                    Ok(profile) => { let _ = sender.send(Event::SessionRestored(profile)); }
+                    Err(error) => { let _ = sender.send(Event::SessionRestoreFailed(error)); }
+                }
             });
             if !skip_update {
                 app.start_update_check();
             }
         }
         app
+    }
+
+    fn open_session_screen(&mut self, ctx: &egui::Context) {
+        self.screen = if self.profile.is_some() { Screen::Launcher } else { Screen::Auth };
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0)));
+        center_window(ctx, Vec2::new(1080.0, 720.0));
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
     }
 
     fn install(&mut self, ctx: &egui::Context) {
@@ -152,10 +166,8 @@ impl MokyApp {
                 Event::Downloading(version) => self.status = format!("Téléchargement de la version {version}…"),
                 Event::UpToDate(version) => {
                     self.version = version;
-                    self.screen = Screen::Launcher;
-                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0)));
-                    center_window(ctx, Vec2::new(1080.0, 720.0));
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
+                    self.startup_finished = true;
+                    if self.session_checked { self.open_session_screen(ctx); }
                 }
                 Event::DownloadProgress(version, progress) => {
                     self.status = format!("Téléchargement de la version {version}…");
@@ -168,14 +180,30 @@ impl MokyApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
                 Event::Failed(_error) => {
+                    self.startup_finished = true;
+                    if self.session_checked { self.open_session_screen(ctx); }
+                },
+                Event::SessionRestored(profile) => {
+                    self.profile = profile;
+                    self.session_checked = true;
+                    if self.startup_finished { self.open_session_screen(ctx); }
+                },
+                Event::SessionRestoreFailed(error) => {
+                    self.profile = None;
+                    self.session_checked = true;
+                    self.status = format!("Impossible de restaurer la session : {error}");
+                    if self.startup_finished { self.open_session_screen(ctx); }
+                },
+                Event::Authenticated(profile) => {
+                    self.profile = Some(profile);
+                    self.session_checked = true;
+                    self.auth_busy = false;
+                    self.status.clear();
                     self.screen = Screen::Launcher;
                     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0)));
                     center_window(ctx, Vec2::new(1080.0, 720.0));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
                 },
-                Event::SessionRestored(profile) => { self.profile = profile; if self.profile.is_none() { self.screen = Screen::Auth; ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0)));
-                    center_window(ctx, Vec2::new(1080.0, 720.0)); } },
-                Event::Authenticated(profile) => { self.profile = Some(profile); self.auth_busy = false; self.status.clear(); self.screen = Screen::Launcher; ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0))); center_window(ctx, Vec2::new(1080.0, 720.0)); },
                 Event::AuthFailed(error) => { self.auth_busy = false; self.status = error; self.screen = Screen::Auth; },
             }
             ctx.request_repaint();
@@ -189,7 +217,9 @@ impl MokyApp {
                 self.screen = Screen::Installer;
             } else if self.install_path.join("MokyLauncher.installed").exists() {
                 self.status = "Installation terminée !".into();
-                self.screen = Screen::Launcher;
+                self.screen = Screen::Auth;
+                self.session_checked = true;
+                self.profile = None;
                 if let Ok(exe) = env::current_exe() {
                     let target = self.install_path.join("MokyLauncher.exe");
                     if exe != target {
@@ -411,57 +441,65 @@ impl MokyApp {
     }
 
     fn launcher_ui(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
+        if self.profile.is_none() {
+            self.screen = Screen::Auth;
+            return;
+        }
+
         let profile = self.profile.clone();
         let mut logout = false;
         let mut open_settings = false;
         let mut close_settings = false;
         let rect = ui.max_rect();
-        draw_voxel_backdrop(ui, rect, 0.48);
+        draw_voxel_backdrop(ui, rect, 0.30);
 
+        // Paladium-inspired composition: narrow icon rail, full-bleed game scene,
+        // strong central title/action and a compact information strip.
         ui.horizontal(|ui| {
-            ui.add_space(18.0);
+            ui.add_space(12.0);
             egui::Frame::new()
-                .fill(Color32::from_rgba_unmultiplied(7, 7, 7, 236))
-                .inner_margin(egui::Margin { left: 13, right: 13, top: 22, bottom: 18 })
+                .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 224))
+                .corner_radius(egui::CornerRadius::same(12))
+                .inner_margin(egui::Margin { left: 9, right: 9, top: 18, bottom: 14 })
                 .show(ui, |ui| {
-                    ui.set_width(166.0);
+                    ui.set_width(58.0);
                     ui.set_min_height(ui.available_height());
-                    ui.label(RichText::new("M O K Y").size(19.0).strong().color(TEXT));
-                    ui.label(RichText::new("S T U D I O S").size(8.0).strong().color(MUTED));
-                    ui.add_space(48.0);
-                    ui.label(RichText::new("ESPACE DE JEU").size(8.0).strong().color(Color32::from_gray(115)));
-                    ui.add_space(12.0);
-                    if nav_item(ui, "Accueil", !self.settings_open && !self.servers_open) {
-                        self.settings_open = false;
-                        self.servers_open = false;
-                    }
-                    ui.add_space(5.0);
-                    if nav_item(ui, "Serveurs", self.servers_open) {
-                        self.servers_open = true;
-                        self.settings_open = false;
-                    }
-                    ui.add_space(5.0);
-                    if nav_item(ui, "Paramètres", self.settings_open) {
-                        open_settings = true;
-                    }
-                    ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
-                        ui.label(RichText::new(format!("VERSION {}", self.version)).size(8.0).color(Color32::from_gray(105)));
-                        if let Some(p) = profile.as_ref() {
-                            ui.add_space(10.0);
-                            ui.label(RichText::new(&p.name).size(10.0).strong().color(TEXT));
-                            ui.label(RichText::new("COMPTE MICROSOFT").size(7.0).color(MUTED));
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new("M").size(27.0).strong().color(TEXT));
+                        ui.add_space(42.0);
+                        if rail_item(ui, egui_material_icons::icons::ICON_HOME, !self.settings_open && !self.servers_open) {
+                            self.settings_open = false;
+                            self.servers_open = false;
                         }
+                        ui.add_space(10.0);
+                        if rail_item(ui, egui_material_icons::icons::ICON_APPS, self.servers_open) {
+                            self.servers_open = true;
+                            self.settings_open = false;
+                        }
+                        ui.add_space(10.0);
+                        if rail_item(ui, egui_material_icons::icons::ICON_SETTINGS, self.settings_open) {
+                            open_settings = true;
+                        }
+                        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+                            if let Some(p) = profile.as_ref() {
+                                ui.label(RichText::new(p.name.chars().take(1).collect::<String>().to_uppercase())
+                                    .size(15.0).strong().color(TEXT));
+                            }
+                            ui.add_space(12.0);
+                            ui.label(RichText::new(format!("v{}", self.version)).size(8.0).color(Color32::from_gray(115)));
+                        });
                     });
                 });
 
-            ui.add_space(18.0);
+            ui.add_space(22.0);
             ui.vertical(|ui| {
                 ui.set_min_width(ui.available_width());
                 ui.set_min_height(ui.available_height());
-                ui.add_space(22.0);
+                ui.add_space(18.0);
+
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(if self.settings_open { "PARAMÈTRES" } else { "MOKY STUDIOS  /  ACCUEIL" })
-                        .size(9.0).strong().color(Color32::from_gray(190)));
+                    ui.label(RichText::new(if self.settings_open { "PARAMÈTRES" } else if self.servers_open { "VOS SERVEURS" } else { "MOKY STUDIOS" })
+                        .size(10.0).strong().color(Color32::from_gray(225)));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if let Some(p) = profile.as_ref() {
                             ui.label(RichText::new(&p.name).size(10.0).strong().color(TEXT));
@@ -469,83 +507,112 @@ impl MokyApp {
                         }
                     });
                 });
-                ui.add_space(22.0);
 
                 if self.settings_open {
-                    ui.label(RichText::new("Paramètres").size(29.0).strong().color(TEXT));
-                    ui.add_space(18.0);
-                    egui::Frame::new().fill(Color32::from_rgba_unmultiplied(8, 8, 8, 225))
-                        .stroke(Stroke::new(1.0, Color32::from_gray(55)))
-                        .corner_radius(egui::CornerRadius::same(10))
-                        .inner_margin(egui::Margin::same(20)).show(ui, |ui| {
-                            ui.set_min_width(500.0);
-                            ui.label(RichText::new("COMPTE MINECRAFT").size(8.0).strong().color(MUTED));
-                            ui.add_space(10.0);
-                            if let Some(p) = profile.as_ref() {
-                                ui.label(RichText::new(&p.name).size(18.0).strong().color(TEXT));
-                                ui.label(RichText::new(&p.id).size(9.0).color(MUTED));
-                                ui.add_space(16.0);
-                                if ui.button("Se déconnecter").clicked() { logout = true; }
-                            }
-                        });
-                    close_settings = ui.button("Retour à l’accueil").clicked();
-                } else if self.servers_open {
-                    ui.label(RichText::new("Serveurs").size(29.0).strong().color(TEXT));
-                    ui.add_space(12.0);
+                    ui.add_space(42.0);
+                    ui.label(RichText::new("Paramètres").size(34.0).strong().color(TEXT));
+                    ui.add_space(22.0);
                     egui::Frame::new()
-                        .fill(Color32::from_rgba_unmultiplied(8, 8, 8, 225))
-                        .stroke(Stroke::new(1.0, Color32::from_gray(55)))
+                        .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 222))
                         .corner_radius(egui::CornerRadius::same(10))
                         .inner_margin(egui::Margin::same(22))
                         .show(ui, |ui| {
                             ui.set_min_width(500.0);
-                            ui.label(RichText::new("AUCUN SERVEUR CONFIGURÉ").size(9.0).strong().color(MUTED));
-                            ui.add_space(9.0);
-                            ui.label(RichText::new("Les serveurs Moky Studios apparaîtront ici.").size(14.0).strong().color(TEXT));
-                            ui.label(RichText::new("La sélection et le lancement seront activés dès que leurs configurations seront intégrées.")
-                                .size(10.0).color(MUTED));
+                            ui.label(RichText::new("COMPTE MINECRAFT").size(9.0).strong().color(MUTED));
+                            ui.add_space(12.0);
+                            if let Some(p) = profile.as_ref() {
+                                ui.label(RichText::new(&p.name).size(20.0).strong().color(TEXT));
+                                ui.label(RichText::new(&p.id).size(10.0).color(MUTED));
+                                ui.add_space(18.0);
+                                if primary_button(ui, "SE DÉCONNECTER") { logout = true; }
+                            }
+                        });
+                    ui.add_space(12.0);
+                    close_settings = ui.button("←  Retour à l’accueil").clicked();
+                } else if self.servers_open {
+                    ui.add_space(42.0);
+                    ui.label(RichText::new("Vos serveurs").size(36.0).strong().color(TEXT));
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("Tous les univers Moky Studios, réunis au même endroit.")
+                        .size(13.0).color(Color32::from_gray(210)));
+                    ui.add_space(34.0);
+                    egui::Frame::new()
+                        .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 218))
+                        .corner_radius(egui::CornerRadius::same(10))
+                        .inner_margin(egui::Margin::same(24))
+                        .show(ui, |ui| {
+                            ui.set_min_width(540.0);
+                            ui.label(RichText::new("BIENTÔT DISPONIBLE").size(9.0).strong().color(MUTED));
+                            ui.add_space(10.0);
+                            ui.label(RichText::new("Les serveurs Moky Studios seront affichés ici.")
+                                .size(17.0).strong().color(TEXT));
+                            ui.add_space(6.0);
+                            ui.label(RichText::new("Aucune configuration de serveur n’est encore intégrée.")
+                                .size(11.0).color(MUTED));
                         });
                 } else {
-                    ui.vertical(|ui| {
-                        ui.add_space(10.0);
-                        ui.label(RichText::new("VOTRE PROCHAINE AVENTURE").size(9.0).strong().color(Color32::from_gray(190)));
-                        ui.add_space(9.0);
-                        ui.label(RichText::new("Entrez dans\nun autre monde.").size(38.0).strong().color(TEXT));
-                        ui.add_space(10.0);
-                        ui.label(RichText::new("Retrouvez les univers Minecraft de Moky Studios\nà partir d’un seul launcher.")
-                            .size(12.0).color(Color32::from_gray(205)));
-                        ui.add_space(30.0);
+                    ui.add_space(62.0);
+                    ui.label(RichText::new("VOTRE PROCHAINE AVENTURE").size(10.0).strong().color(Color32::from_gray(220)));
+                    ui.add_space(12.0);
+                    ui.label(RichText::new("MOKY STUDIOS").size(54.0).strong().color(TEXT));
+                    ui.add_space(7.0);
+                    ui.label(RichText::new("Un launcher. Plusieurs mondes. À vous de jouer.")
+                        .size(15.0).color(Color32::from_gray(225)));
+                    ui.add_space(32.0);
+
+                    ui.horizontal(|ui| {
                         egui::Frame::new()
-                            .fill(Color32::from_rgba_unmultiplied(8, 8, 8, 225))
-                            .stroke(Stroke::new(1.0, Color32::from_gray(60)))
-                            .corner_radius(egui::CornerRadius::same(10))
-                            .inner_margin(egui::Margin::same(18))
+                            .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 220))
+                            .corner_radius(egui::CornerRadius::same(8))
+                            .inner_margin(egui::Margin { left: 16, right: 18, top: 12, bottom: 12 })
                             .show(ui, |ui| {
-                                ui.set_min_width(470.0);
+                                ui.set_min_width(310.0);
                                 ui.horizontal(|ui| {
+                                    ui.label(egui_material_icons::icons::ICON_APPS);
+                                    ui.add_space(8.0);
                                     ui.vertical(|ui| {
-                                        ui.label(RichText::new("SÉLECTION DU SERVEUR").size(8.0).strong().color(MUTED));
-                                        ui.add_space(8.0);
-                                        ui.label(RichText::new("Aucun serveur configuré").size(15.0).strong().color(TEXT));
-                                        ui.label(RichText::new("Les univers Moky Studios seront proposés ici.").size(10.0).color(MUTED));
+                                        ui.label(RichText::new("SERVEUR SÉLECTIONNÉ").size(8.0).strong().color(MUTED));
+                                        ui.label(RichText::new("Aucun serveur disponible").size(13.0).strong().color(TEXT));
                                     });
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        ui.label(egui_material_icons::icons::ICON_APPS);
+                                        ui.label(egui_material_icons::icons::ICON_EXPAND_MORE);
                                     });
                                 });
                             });
-                        ui.add_space(14.0);
-                        let play = egui::Button::new(RichText::new("JOUER  →").size(13.0).strong().color(Color32::from_gray(110)))
-                            .fill(Color32::from_gray(45)).stroke(Stroke::NONE)
+                        ui.add_space(10.0);
+                        let play = egui::Button::new(RichText::new("▶   JOUER").size(14.0).strong().color(Color32::BLACK))
+                            .fill(Color32::WHITE)
+                            .stroke(Stroke::NONE)
                             .corner_radius(egui::CornerRadius::same(7))
-                            .min_size(Vec2::new(470.0, 48.0));
+                            .min_size(Vec2::new(190.0, 58.0));
                         ui.add_enabled(false, play);
-                        ui.add_space(28.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("MOKY STUDIOS").size(8.0).strong().color(Color32::from_gray(135)));
-                            ui.add_space(10.0);
-                            ui.label(RichText::new("UN UNIVERS. PLUSIEURS AVENTURES.").size(8.0).color(Color32::from_gray(105)));
-                        });
+                    });
+
+                    ui.add_space(68.0);
+                    ui.horizontal(|ui| {
+                        egui::Frame::new()
+                            .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 218))
+                            .corner_radius(egui::CornerRadius::same(8))
+                            .inner_margin(egui::Margin::same(16))
+                            .show(ui, |ui| {
+                                ui.set_min_width(350.0);
+                                ui.label(RichText::new("DERNIÈRES ACTUALITÉS").size(9.0).strong().color(MUTED));
+                                ui.add_space(12.0);
+                                ui.label(RichText::new("Les actualités Moky Studios arriveront ici.")
+                                    .size(12.0).color(TEXT));
+                            });
+                        ui.add_space(12.0);
+                        egui::Frame::new()
+                            .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 218))
+                            .corner_radius(egui::CornerRadius::same(8))
+                            .inner_margin(egui::Margin::same(16))
+                            .show(ui, |ui| {
+                                ui.set_min_width(260.0);
+                                ui.label(RichText::new("MOKY STUDIOS").size(9.0).strong().color(MUTED));
+                                ui.add_space(12.0);
+                                ui.label(RichText::new("Un seul endroit pour retrouver tous nos serveurs.")
+                                    .size(12.0).color(TEXT));
+                            });
                     });
                 }
             });
@@ -556,11 +623,22 @@ impl MokyApp {
         if logout {
             let _ = auth::sign_out();
             self.profile = None;
+            self.session_checked = true;
             self.screen = Screen::Auth;
             self.settings_open = false;
             self.servers_open = false;
         }
     }
+}
+
+fn rail_item(ui: &mut egui::Ui, icon: &str, selected: bool) -> bool {
+    let button = egui::Button::new(RichText::new(icon).size(21.0)
+        .color(if selected { TEXT } else { MUTED }))
+        .fill(if selected { Color32::from_gray(48) } else { Color32::TRANSPARENT })
+        .stroke(Stroke::NONE)
+        .corner_radius(egui::CornerRadius::same(9))
+        .min_size(Vec2::new(42.0, 42.0));
+    ui.add(button).clicked()
 }
 
 fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
