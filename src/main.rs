@@ -8,7 +8,7 @@ use std::{
     env,
     error::Error,
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::mpsc::{self, Receiver, Sender},
@@ -51,12 +51,14 @@ enum Event {
     SessionRestored(Option<auth::MinecraftProfile>),
     Authenticated(auth::MinecraftProfile),
     AuthFailed(String),
+    DownloadProgress(String, f32),
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum Screen {
     Installer,
     Installing,
+    Startup,
     Launcher,
 }
 
@@ -70,19 +72,18 @@ struct MokyApp {
     install_path: PathBuf,
     profile: Option<auth::MinecraftProfile>,
     auth_busy: bool,
+    startup_progress: f32,
 }
 
 impl MokyApp {
     fn new() -> Self {
         let install_path = installation_path();
-        let installed = env::current_exe()
-            .ok()
-            .and_then(|p| p.canonicalize().ok())
-            == Some(install_path.join("MokyLauncher.exe").canonicalize().unwrap_or_default());
+        let installed = is_installed();
+        let skip_update = env::args().any(|arg| arg == "--launch");
 
         let (sender, receiver) = mpsc::channel();
         let mut app = Self {
-            screen: if installed { Screen::Launcher } else { Screen::Installer },
+            screen: if !installed { Screen::Installer } else if skip_update { Screen::Launcher } else { Screen::Startup },
             status: if installed { "Recherche des mises à jour…".into() } else { "Prêt à installer".into() },
             version: env!("CARGO_PKG_VERSION").into(),
             receiver,
@@ -91,6 +92,7 @@ impl MokyApp {
             install_path,
             profile: None,
             auth_busy: false,
+            startup_progress: 0.0,
         };
 
         if installed {
@@ -99,7 +101,9 @@ impl MokyApp {
                 let result = auth::restore_session().unwrap_or(None);
                 let _ = sender.send(Event::SessionRestored(result));
             });
-            app.start_update_check();
+            if !skip_update {
+                app.start_update_check();
+            }
         }
         app
     }
@@ -147,13 +151,25 @@ impl MokyApp {
                 Event::Downloading(version) => self.status = format!("Téléchargement de la version {version}…"),
                 Event::UpToDate(version) => {
                     self.version = version;
-                    self.status = "Votre launcher est à jour".into();
+                    self.screen = Screen::Launcher;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(620.0, 650.0)));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
                 }
-                Event::Updated(version) => {
-                    self.version = version.clone();
-                    self.status = format!("Mise à jour {version} prête. Redémarrez le launcher pour l’appliquer.");
+                Event::DownloadProgress(version, progress) => {
+                    self.status = format!("Téléchargement de la version {version}…");
+                    self.startup_progress = progress;
                 }
-                Event::Failed(error) => self.status = format!("Vérification indisponible : {error}"),
+                Event::Updated(_version) => {
+                    if let Ok(exe) = env::current_exe() {
+                        let _ = Command::new(exe).arg("--launch").spawn();
+                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+                Event::Failed(_error) => {
+                    self.screen = Screen::Launcher;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(620.0, 650.0)));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
+                },
                 Event::SessionRestored(profile) => self.profile = profile,
                 Event::Authenticated(profile) => { self.profile = Some(profile); self.auth_busy = false; },
                 Event::AuthFailed(error) => { self.auth_busy = false; self.status = error; },
@@ -207,6 +223,7 @@ impl eframe::App for MokyApp {
                     match self.screen {
                         Screen::Installer => self.installer_ui(ui, ctx),
                         Screen::Installing => self.installing_ui(ui),
+                        Screen::Startup => self.startup_ui(ui),
                         Screen::Launcher => self.launcher_ui(ui, ctx),
                     }
                     ui.add_space(20.0);
@@ -220,6 +237,27 @@ impl eframe::App for MokyApp {
 }
 
 impl MokyApp {
+    fn startup_ui(&self, ui: &mut egui::Ui) {
+        ui.vertical_centered(|ui| {
+            ui.add_space(12.0);
+            ui.label(RichText::new("MOKY STUDIOS").size(10.0).strong().color(MUTED));
+            ui.add_space(8.0);
+            ui.label(RichText::new("Moky Launcher").size(22.0).strong().color(TEXT));
+            ui.add_space(8.0);
+            let label = if self.startup_progress > 0.0 {
+                "Téléchargement de la mise à jour…"
+            } else {
+                "Recherche des mises à jour…"
+            };
+            ui.label(RichText::new(label).size(12.0).color(MUTED));
+            ui.add_space(14.0);
+            ui.add(egui::ProgressBar::new(self.startup_progress)
+                .desired_width(330.0)
+                .animate(true)
+                .fill(Color32::WHITE));
+        });
+    }
+
     fn installer_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.add_space(42.0);
         ui.label(RichText::new("MOKY STUDIOS").size(11.0).strong().color(MUTED));
@@ -331,6 +369,12 @@ impl MokyApp {
     }
 }
 
+fn is_installed() -> bool {
+    let path = installation_path().join("MokyLauncher.exe");
+    env::current_exe().ok().and_then(|p| p.canonicalize().ok())
+        == path.canonicalize().ok()
+}
+
 fn installation_path() -> PathBuf {
     let base = env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
@@ -392,9 +436,19 @@ fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn E
     let asset = release.assets.iter().find(|asset| asset.name == ASSET_NAME)
         .ok_or("L’installateur Windows est absent de la dernière release GitHub")?;
     let mut response = client.get(&asset.browser_download_url).send()?.error_for_status()?;
+    let total = response.content_length().unwrap_or(0);
+    let mut downloaded = 0u64;
+    let mut buffer = [0u8; 64 * 1024];
     let mut temporary_file = tempfile::Builder::new()
         .prefix("moky-launcher-update-").suffix(".exe").tempfile()?;
-    response.copy_to(&mut temporary_file)?;
+    loop {
+        let count = response.read(&mut buffer)?;
+        if count == 0 { break; }
+        temporary_file.write_all(&buffer[..count])?;
+        downloaded += count as u64;
+        let progress = if total > 0 { downloaded as f32 / total as f32 } else { 0.0 };
+        let _ = sender.send(Event::DownloadProgress(latest.to_string(), progress.clamp(0.0, 1.0)));
+    }
     temporary_file.flush()?;
     self_replace::self_replace(temporary_file.path())?;
     Ok(Some(latest.to_string()))
@@ -435,12 +489,13 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
+    let startup_window = is_installed() && !env::args().any(|arg| arg == "--launch");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([620.0, 650.0])
-            .with_min_inner_size([560.0, 600.0])
+            .with_inner_size(if startup_window { [420.0, 190.0] } else { [620.0, 650.0] })
+            .with_min_inner_size(if startup_window { [420.0, 190.0] } else { [560.0, 600.0] })
             .with_resizable(false)
-            .with_title("Moky Launcher — Moky Studios"),
+            .with_title(if startup_window { "Moky Launcher — Mise à jour" } else { "Moky Launcher — Moky Studios" }),
         ..Default::default()
     };
 
