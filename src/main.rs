@@ -456,193 +456,136 @@ impl MokyApp {
         });
     }
 
-    fn launcher_ui(&mut self, ui: &mut egui::Ui, _ctx: &egui::Context) {
-        if self.profile.is_none() {
-            self.screen = Screen::Auth;
-            return;
-        }
-
-        let profile = self.profile.clone();
+    fn launcher_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.profile.is_none() { self.screen = Screen::Auth; return; }
+        let profile = self.profile.clone().unwrap();
         let mut logout = false;
-        let mut open_settings = false;
-        let mut close_settings = false;
         let rect = ui.max_rect();
-        draw_voxel_backdrop(ui, rect, 0.30);
+        draw_voxel_backdrop(ui, rect, 0.18);
 
-        // Paladium-inspired composition: narrow icon rail, full-bleed game scene,
-        // strong central title/action and a compact information strip.
+        // A single Paladium-like launcher surface: skin/account at top-left,
+        // server picker in the left column, and the selected game in the hero.
         ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            egui::Frame::new()
-                .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 224))
-                .corner_radius(egui::CornerRadius::same(12))
-                .inner_margin(egui::Margin { left: 9, right: 9, top: 18, bottom: 14 })
-                .show(ui, |ui| {
-                    ui.set_width(58.0);
-                    ui.set_min_height(ui.available_height());
-                    ui.vertical_centered(|ui| {
-                        ui.label(RichText::new("M").size(27.0).strong().color(TEXT));
-                        ui.add_space(42.0);
-                        if rail_item(ui, egui_material_icons::icons::ICON_HOME, !self.settings_open && !self.servers_open) {
-                            self.settings_open = false;
-                            self.servers_open = false;
-                        }
-                        ui.add_space(10.0);
-                        if rail_item(ui, egui_material_icons::icons::ICON_APPS, self.servers_open) {
-                            self.servers_open = true;
-                            self.settings_open = false;
-                        }
-                        ui.add_space(10.0);
-                        if rail_item(ui, egui_material_icons::icons::ICON_SETTINGS, self.settings_open) {
-                            open_settings = true;
-                        }
-                        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
-                            if let Some(p) = profile.as_ref() {
-                                ui.label(RichText::new(p.name.chars().take(1).collect::<String>().to_uppercase())
-                                    .size(15.0).strong().color(TEXT));
-                            }
-                            ui.add_space(12.0);
-                            ui.label(RichText::new(format!("v{}", self.version)).size(8.0).color(Color32::from_gray(115)));
-                        });
+            ui.add_space(18.0);
+            ui.vertical(|ui| {
+                ui.add_space(10.0);
+                let avatar = egui::Button::new(
+                    RichText::new("◈").size(23.0).strong().color(TEXT)
+                ).fill(Color32::from_rgba_unmultiplied(12,12,12,235))
+                 .stroke(Stroke::new(1.0, Color32::from_gray(85)))
+                 .corner_radius(egui::CornerRadius::same(9));
+                if ui.add_sized(Vec2::splat(48.0), avatar).on_hover_text(
+                    format!("Compte Minecraft : {} — Paramètres", profile.name)
+                ).clicked() {
+                    self.settings_open = !self.settings_open;
+                }
+                ui.add_space(28.0);
+                ui.label(RichText::new("JEUX").size(9.0).strong().color(MUTED));
+                ui.add_space(10.0);
+                egui::Frame::new()
+                    .fill(Color32::from_rgba_unmultiplied(7,7,7,220))
+                    .stroke(Stroke::new(1.0, Color32::from_gray(65)))
+                    .corner_radius(egui::CornerRadius::same(10))
+                    .inner_margin(egui::Margin::same(10))
+                    .show(ui, |ui| {
+                        ui.set_width(178.0);
+                        let selected = egui::Button::new(
+                            RichText::new("▣   Minecraft").size(13.0).strong().color(TEXT)
+                        ).fill(Color32::from_rgba_unmultiplied(255,255,255,22))
+                         .stroke(Stroke::new(1.0, Color32::from_gray(125)))
+                         .corner_radius(egui::CornerRadius::same(8))
+                         .min_size(Vec2::new(156.0,54.0));
+                        let _ = ui.add(selected);
+                        ui.add_space(6.0);
+                        ui.label(RichText::new("JAVA EDITION").size(8.0).color(MUTED));
+                        ui.label(RichText::new("NeoForge  ·  Sodium").size(9.0).color(Color32::from_gray(185)));
                     });
+                ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
+                    ui.label(RichText::new(format!("v{}", self.version)).size(8.0).color(Color32::from_gray(110)));
                 });
-
-            ui.add_space(22.0);
+            });
+            ui.add_space(26.0);
             ui.vertical(|ui| {
                 ui.set_min_width(ui.available_width());
                 ui.set_min_height(ui.available_height());
                 ui.add_space(18.0);
-
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(if self.settings_open { "PARAMÈTRES" } else if self.servers_open { "VOS SERVEURS" } else { "MOKY STUDIOS" })
-                        .size(10.0).strong().color(Color32::from_gray(225)));
+                    ui.label(RichText::new("MOKY STUDIOS").size(10.0).strong().color(Color32::from_gray(225)));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if let Some(p) = profile.as_ref() {
-                            ui.label(RichText::new(&p.name).size(10.0).strong().color(TEXT));
-                            ui.label(egui_material_icons::icons::ICON_ACCOUNT_CIRCLE);
-                        }
+                        ui.label(RichText::new(&profile.name).size(10.0).strong().color(TEXT));
                     });
                 });
-
-                if self.settings_open {
-                    ui.add_space(42.0);
-                    ui.label(RichText::new("Paramètres").size(34.0).strong().color(TEXT));
-                    ui.add_space(22.0);
-                    egui::Frame::new()
-                        .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 222))
-                        .corner_radius(egui::CornerRadius::same(10))
-                        .inner_margin(egui::Margin::same(22))
-                        .show(ui, |ui| {
-                            ui.set_min_width(500.0);
-                            ui.label(RichText::new("COMPTE MINECRAFT").size(9.0).strong().color(MUTED));
-                            ui.add_space(12.0);
-                            if let Some(p) = profile.as_ref() {
-                                ui.label(RichText::new(&p.name).size(20.0).strong().color(TEXT));
-                                ui.label(RichText::new(&p.id).size(10.0).color(MUTED));
-                                ui.add_space(18.0);
-                                if primary_button(ui, "SE DÉCONNECTER") { logout = true; }
-                            }
-                        });
-                    ui.add_space(12.0);
-                    close_settings = ui.button("←  Retour à l’accueil").clicked();
-                } else if self.servers_open {
-                    ui.add_space(42.0);
-                    ui.label(RichText::new("Vos serveurs").size(36.0).strong().color(TEXT));
-                    ui.add_space(12.0);
-                    ui.label(RichText::new("Tous les univers Moky Studios, réunis au même endroit.")
-                        .size(13.0).color(Color32::from_gray(210)));
-                    ui.add_space(34.0);
-                    egui::Frame::new()
-                        .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 218))
-                        .corner_radius(egui::CornerRadius::same(10))
-                        .inner_margin(egui::Margin::same(24))
-                        .show(ui, |ui| {
-                            ui.set_min_width(540.0);
-                            ui.label(RichText::new("BIENTÔT DISPONIBLE").size(9.0).strong().color(MUTED));
-                            ui.add_space(10.0);
-                            ui.label(RichText::new("Les serveurs Moky Studios seront affichés ici.")
-                                .size(17.0).strong().color(TEXT));
-                            ui.add_space(6.0);
-                            ui.label(RichText::new("Aucune configuration de serveur n’est encore intégrée.")
-                                .size(11.0).color(MUTED));
-                        });
-                } else {
-                    ui.add_space(62.0);
-                    ui.label(RichText::new("VOTRE PROCHAINE AVENTURE").size(10.0).strong().color(Color32::from_gray(220)));
-                    ui.add_space(12.0);
-                    ui.label(RichText::new("MOKY STUDIOS").size(54.0).strong().color(TEXT));
-                    ui.add_space(7.0);
-                    ui.label(RichText::new("Un launcher. Plusieurs mondes. À vous de jouer.")
-                        .size(15.0).color(Color32::from_gray(225)));
-                    ui.add_space(32.0);
-
-                    ui.horizontal(|ui| {
-                        egui::Frame::new()
-                            .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 220))
-                            .corner_radius(egui::CornerRadius::same(8))
-                            .inner_margin(egui::Margin { left: 16, right: 18, top: 12, bottom: 12 })
-                            .show(ui, |ui| {
-                                ui.set_min_width(310.0);
-                                ui.horizontal(|ui| {
-                                    ui.label(egui_material_icons::icons::ICON_APPS);
-                                    ui.add_space(8.0);
-                                    ui.vertical(|ui| {
-                                        ui.label(RichText::new("SERVEUR SÉLECTIONNÉ").size(8.0).strong().color(MUTED));
-                                        ui.label(RichText::new("Aucun serveur disponible").size(13.0).strong().color(TEXT));
-                                    });
-                                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        ui.label(egui_material_icons::icons::ICON_EXPAND_MORE);
-                                    });
-                                });
-                            });
-                        ui.add_space(10.0);
-                        let play = egui::Button::new(RichText::new("▶   JOUER").size(14.0).strong().color(Color32::BLACK))
-                            .fill(Color32::WHITE)
-                            .stroke(Stroke::NONE)
-                            .corner_radius(egui::CornerRadius::same(7))
-                            .min_size(Vec2::new(190.0, 58.0));
-                        ui.add_enabled(false, play);
-                    });
-
-                    ui.add_space(68.0);
-                    ui.horizontal(|ui| {
-                        egui::Frame::new()
-                            .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 218))
-                            .corner_radius(egui::CornerRadius::same(8))
-                            .inner_margin(egui::Margin::same(16))
-                            .show(ui, |ui| {
-                                ui.set_min_width(350.0);
-                                ui.label(RichText::new("DERNIÈRES ACTUALITÉS").size(9.0).strong().color(MUTED));
-                                ui.add_space(12.0);
-                                ui.label(RichText::new("Les actualités Moky Studios arriveront ici.")
-                                    .size(12.0).color(TEXT));
-                            });
-                        ui.add_space(12.0);
-                        egui::Frame::new()
-                            .fill(Color32::from_rgba_unmultiplied(5, 5, 5, 218))
-                            .corner_radius(egui::CornerRadius::same(8))
-                            .inner_margin(egui::Margin::same(16))
-                            .show(ui, |ui| {
-                                ui.set_min_width(260.0);
-                                ui.label(RichText::new("MOKY STUDIOS").size(9.0).strong().color(MUTED));
-                                ui.add_space(12.0);
-                                ui.label(RichText::new("Un seul endroit pour retrouver tous nos serveurs.")
-                                    .size(12.0).color(TEXT));
-                            });
-                    });
+                ui.add_space(88.0);
+                ui.label(RichText::new("VOTRE MONDE VOUS ATTEND").size(10.0).strong().color(Color32::from_gray(220)));
+                ui.add_space(12.0);
+                ui.label(RichText::new("MINECRAFT").size(58.0).strong().color(TEXT));
+                ui.add_space(8.0);
+                ui.label(RichText::new("Minecraft Java Edition").size(16.0).color(Color32::from_gray(225)));
+                ui.add_space(12.0);
+                ui.horizontal(|ui| {
+                    pill(ui, "26.3", Color32::WHITE);
+                    ui.add_space(6.0);
+                    pill(ui, "NEOFORGE", Color32::WHITE);
+                    ui.add_space(6.0);
+                    pill(ui, "SODIUM", Color32::WHITE);
+                });
+                ui.add_space(28.0);
+                let play = egui::Button::new(RichText::new("▶   JOUER").size(15.0).strong().color(Color32::BLACK))
+                    .fill(Color32::WHITE).stroke(Stroke::NONE)
+                    .corner_radius(egui::CornerRadius::same(7))
+                    .min_size(Vec2::new(224.0,60.0));
+                if ui.add(play).clicked() {
+                    self.status = "Préparation de Minecraft…".into();
                 }
+                ui.add_space(58.0);
+                ui.horizontal(|ui| {
+                    egui::Frame::new()
+                        .fill(Color32::from_rgba_unmultiplied(5,5,5,224))
+                        .stroke(Stroke::new(1.0, Color32::from_gray(45)))
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .inner_margin(egui::Margin::same(17))
+                        .show(ui, |ui| {
+                            ui.set_min_width(360.0);
+                            ui.label(RichText::new("ACTUALITÉS").size(9.0).strong().color(MUTED));
+                            ui.add_space(12.0);
+                            ui.label(RichText::new("Les actualités Moky Studios apparaîtront ici.")
+                                .size(12.0).color(TEXT));
+                        });
+                    ui.add_space(12.0);
+                    egui::Frame::new()
+                        .fill(Color32::from_rgba_unmultiplied(5,5,5,224))
+                        .stroke(Stroke::new(1.0, Color32::from_gray(45)))
+                        .corner_radius(egui::CornerRadius::same(8))
+                        .inner_margin(egui::Margin::same(17))
+                        .show(ui, |ui| {
+                            ui.set_min_width(220.0);
+                            ui.label(RichText::new("MOKY STUDIOS").size(9.0).strong().color(MUTED));
+                            ui.add_space(12.0);
+                            ui.label(RichText::new("Un launcher pensé pour jouer.")
+                                .size(12.0).color(TEXT));
+                        });
+                });
             });
         });
 
-        if open_settings { self.settings_open = true; }
-        if close_settings { self.settings_open = false; }
+        if self.settings_open {
+            egui::Window::new("Paramètres du compte")
+                .collapsible(false).resizable(false).default_width(360.0)
+                .anchor(egui::Align2::LEFT_TOP, [78.0, 52.0])
+                .show(ctx, |ui| {
+                    ui.label(RichText::new(&profile.name).size(18.0).strong().color(TEXT));
+                    ui.label(RichText::new(&profile.id).size(9.0).color(MUTED));
+                    ui.add_space(12.0);
+                    if ui.button("Se déconnecter").clicked() { logout = true; }
+                    if ui.button("Fermer").clicked() { self.settings_open = false; }
+                });
+        }
         if logout {
             let _ = auth::sign_out();
             self.profile = None;
             self.session_checked = true;
             self.screen = Screen::Auth;
             self.settings_open = false;
-            self.servers_open = false;
         }
     }
 }
