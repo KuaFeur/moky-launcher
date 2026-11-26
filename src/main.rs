@@ -71,6 +71,7 @@ struct MokyApp {
     auth_busy: bool,
     startup_progress: f32,
     settings_open: bool,
+    servers_open: bool,
 }
 
 impl MokyApp {
@@ -92,6 +93,7 @@ impl MokyApp {
             auth_busy: false,
             startup_progress: 0.0,
             settings_open: false,
+            servers_open: false,
         };
 
         if installed {
@@ -253,7 +255,7 @@ impl MokyApp {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let close = ui.add_sized(
                         Vec2::new(30.0, 24.0),
-                        egui::Button::new(RichText::new("×").size(19.0).color(MUTED))
+                        egui::Button::new(egui_material_icons::icons::ICON_CLOSE)
                             .fill(Color32::TRANSPARENT)
                             .stroke(Stroke::NONE),
                     );
@@ -262,7 +264,7 @@ impl MokyApp {
                     }
                     let minimize = ui.add_sized(
                         Vec2::new(30.0, 24.0),
-                        egui::Button::new(RichText::new("—").size(15.0).color(MUTED))
+                        egui::Button::new(egui_material_icons::icons::ICON_REMOVE)
                             .fill(Color32::TRANSPARENT)
                             .stroke(Stroke::NONE),
                     );
@@ -300,7 +302,7 @@ impl MokyApp {
 
     fn auth_ui(&mut self, ui: &mut egui::Ui) {
         let rect = ui.max_rect();
-        draw_voxel_backdrop(ui, rect, 0.52);
+        draw_voxel_backdrop(ui, rect, 0.40);
         let mut clicked = false;
         ui.horizontal(|ui| {
             ui.add_space(42.0);
@@ -414,7 +416,7 @@ impl MokyApp {
         let mut open_settings = false;
         let mut close_settings = false;
         let rect = ui.max_rect();
-        draw_voxel_backdrop(ui, rect, 0.72);
+        draw_voxel_backdrop(ui, rect, 0.48);
 
         ui.horizontal(|ui| {
             ui.add_space(18.0);
@@ -429,14 +431,17 @@ impl MokyApp {
                     ui.add_space(48.0);
                     ui.label(RichText::new("ESPACE DE JEU").size(8.0).strong().color(Color32::from_gray(115)));
                     ui.add_space(12.0);
-                    nav_item(ui, "⌂", "Accueil", !self.settings_open);
+                    if nav_item(ui, "Accueil", !self.settings_open && !self.servers_open) {
+                        self.settings_open = false;
+                        self.servers_open = false;
+                    }
                     ui.add_space(5.0);
-                    nav_item(ui, "▦", "Serveurs", false);
+                    if nav_item(ui, "Serveurs", self.servers_open) {
+                        self.servers_open = true;
+                        self.settings_open = false;
+                    }
                     ui.add_space(5.0);
-                    if ui.add(egui::Button::new(RichText::new("⚙   Paramètres").size(11.0).color(if self.settings_open { TEXT } else { MUTED }))
-                        .fill(if self.settings_open { Color32::from_gray(37) } else { Color32::TRANSPARENT })
-                        .stroke(Stroke::NONE).corner_radius(egui::CornerRadius::same(6))
-                        .min_size(Vec2::new(ui.available_width(), 34.0))).clicked() {
+                    if nav_item(ui, "Paramètres", self.settings_open) {
                         open_settings = true;
                     }
                     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
@@ -483,7 +488,23 @@ impl MokyApp {
                                 if ui.button("Se déconnecter").clicked() { logout = true; }
                             }
                         });
-                    close_settings = ui.button("← Retour à l’accueil").clicked();
+                    close_settings = ui.button("Retour à l’accueil").clicked();
+                } else if self.servers_open {
+                    ui.label(RichText::new("Serveurs").size(29.0).strong().color(TEXT));
+                    ui.add_space(12.0);
+                    egui::Frame::new()
+                        .fill(Color32::from_rgba_unmultiplied(8, 8, 8, 225))
+                        .stroke(Stroke::new(1.0, Color32::from_gray(55)))
+                        .corner_radius(egui::CornerRadius::same(10))
+                        .inner_margin(egui::Margin::same(22))
+                        .show(ui, |ui| {
+                            ui.set_min_width(500.0);
+                            ui.label(RichText::new("AUCUN SERVEUR CONFIGURÉ").size(9.0).strong().color(MUTED));
+                            ui.add_space(9.0);
+                            ui.label(RichText::new("Les serveurs Moky Studios apparaîtront ici.").size(14.0).strong().color(TEXT));
+                            ui.label(RichText::new("La sélection et le lancement seront activés dès que leurs configurations seront intégrées.")
+                                .size(10.0).color(MUTED));
+                        });
                 } else {
                     ui.vertical(|ui| {
                         ui.add_space(10.0);
@@ -505,11 +526,11 @@ impl MokyApp {
                                     ui.vertical(|ui| {
                                         ui.label(RichText::new("SÉLECTION DU SERVEUR").size(8.0).strong().color(MUTED));
                                         ui.add_space(8.0);
-                                        ui.label(RichText::new("Choisissez votre serveur").size(15.0).strong().color(TEXT));
-                                        ui.label(RichText::new("La liste des serveurs sera disponible ici.").size(10.0).color(MUTED));
+                                        ui.label(RichText::new("Aucun serveur configuré").size(15.0).strong().color(TEXT));
+                                        ui.label(RichText::new("Les univers Moky Studios seront proposés ici.").size(10.0).color(MUTED));
                                     });
                                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                        ui.label(RichText::new("⌄").size(20.0).color(MUTED));
+                                        ui.label(egui_material_icons::icons::ICON_APPS);
                                     });
                                 });
                             });
@@ -537,22 +558,19 @@ impl MokyApp {
             self.profile = None;
             self.screen = Screen::Auth;
             self.settings_open = false;
+            self.servers_open = false;
         }
     }
 }
 
-fn nav_item(ui: &mut egui::Ui, glyph: &str, label: &str, selected: bool) {
-    egui::Frame::new()
+fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
+    let button = egui::Button::new(RichText::new(label).size(11.0).strong()
+        .color(if selected { TEXT } else { MUTED }))
         .fill(if selected { Color32::from_gray(38) } else { Color32::TRANSPARENT })
+        .stroke(Stroke::NONE)
         .corner_radius(egui::CornerRadius::same(6))
-        .inner_margin(egui::Margin::symmetric(10, 9))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(glyph).size(16.0).color(if selected { TEXT } else { MUTED }));
-                ui.label(RichText::new(label).size(11.0).strong().color(if selected { TEXT } else { MUTED }));
-            });
-        });
+        .min_size(Vec2::new(ui.available_width(), 36.0));
+    ui.add(button).clicked()
 }
 
 fn draw_voxel_backdrop(ui: &mut egui::Ui, rect: egui::Rect, darkness: f32) {
