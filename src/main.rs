@@ -442,15 +442,23 @@ impl MokyApp {
                             .size(11.0).color(MUTED));
                         ui.add_space(24.0);
                         if let Some(code) = &self.auth_user_code {
-                            ui.add_space(6.0);
-                            ui.label(RichText::new("VOTRE CODE DE CONNEXION").size(8.0).strong().color(MUTED));
-                            ui.add_space(5.0);
-                            ui.label(RichText::new(code).size(30.0).strong().color(TEXT).monospace());
-                            if ui.button("Copier le code").clicked() { ctx.copy_text(code.clone()); }
-                            if let Some(uri) = &self.auth_verification_uri {
-                                if ui.button("Ouvrir la page Microsoft").clicked() { let _ = open::that(uri); }
-                            }
-                            ui.add_space(8.0);
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                if let Some(uri) = &self.auth_verification_uri {
+                                    draw_qr_code(ui, uri, 126.0);
+                                }
+                                ui.add_space(12.0);
+                                ui.vertical(|ui| {
+                                    ui.label(RichText::new("SCANNER POUR SE CONNECTER").size(8.0).strong().color(MUTED));
+                                    ui.add_space(6.0);
+                                    ui.label(RichText::new(code).size(27.0).strong().color(TEXT).monospace());
+                                    if ui.button("Copier le code").clicked() { ctx.copy_text(code.clone()); }
+                                    if let Some(uri) = &self.auth_verification_uri {
+                                        if ui.button("Ouvrir la page Microsoft").clicked() { let _ = open::that(uri); }
+                                    }
+                                });
+                            });
+                            ui.add_space(10.0);
                             ui.horizontal(|ui| { ui.spinner(); ui.label(RichText::new("En attente de votre validation…").size(10.0).color(MUTED)); });
                         } else {
                             let button = egui::Button::new(
@@ -692,6 +700,31 @@ impl MokyApp {
             self.screen = Screen::Auth;
             self.settings_open = false;
         }
+    }
+}
+
+fn draw_qr_code(ui: &mut egui::Ui, value: &str, size: f32) {
+    if let Ok(code) = qrcode::QrCode::new(value.as_bytes()) {
+        let modules = code.width() as usize;
+        let (response, painter) = ui.allocate_painter(Vec2::splat(size), egui::Sense::hover());
+        let rect = response.rect;
+        painter.rect_filled(rect, 4.0, Color32::WHITE);
+        let quiet = 4.0_f32;
+        let cell = size / (modules as f32 + quiet * 2.0);
+        for y in 0..modules {
+            for x in 0..modules {
+                if code[(x, y)] == qrcode::Color::Dark {
+                    let min = rect.min + Vec2::new((x as f32 + quiet) * cell, (y as f32 + quiet) * cell);
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(min, Vec2::splat(cell + 0.15)),
+                        0.0,
+                        Color32::BLACK,
+                    );
+                }
+            }
+        }
+    } else {
+        ui.label(RichText::new("QR indisponible").size(9.0).color(MUTED));
     }
 }
 
