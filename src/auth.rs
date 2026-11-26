@@ -32,18 +32,16 @@ struct OAuthToken {
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct XboxUserProperties<'a> {
+struct XboxUserProperties {
     auth_method: &'static str,
     site_name: &'static str,
     rps_ticket: String,
-    #[serde(skip)]
-    _marker: std::marker::PhantomData<&'a ()>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct XboxUserRequest<'a> {
-    properties: XboxUserProperties<'a>,
+struct XboxUserRequest {
+    properties: XboxUserProperties,
     relying_party: &'static str,
     token_type: &'static str,
 }
@@ -263,7 +261,6 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
                 auth_method: "RPS",
                 site_name: "user.auth.xboxlive.com",
                 rps_ticket: format!("d={microsoft_token}"),
-                _marker: std::marker::PhantomData,
             },
             relying_party: "http://auth.xboxlive.com",
             token_type: "JWT",
@@ -288,7 +285,6 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         .json()?;
 
     let user_hash = xsts.display_claims.xui.first()
-        .or_else(|| xbox.display_claims.xui.first())
         .ok_or("Xbox n'a fourni aucun identifiant utilisateur.")?
         .uhs.clone();
 
@@ -321,9 +317,12 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         .error_for_status()?
         .json()?;
 
-    let skin_url = profile.skins
-        .and_then(|skins| skins.into_iter().find(|skin| skin.state.as_deref() == Some("ACTIVE")).or_else(|| skins.into_iter().next()))
-        .map(|skin| skin.url);
+    let skin_url = profile.skins.and_then(|skins| {
+        skins.iter()
+            .find(|skin| skin.state.as_deref() == Some("ACTIVE"))
+            .or_else(|| skins.first())
+            .map(|skin| skin.url.clone())
+    });
 
     Ok(MinecraftProfile {
         id: profile.id,

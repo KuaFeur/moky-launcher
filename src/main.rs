@@ -270,10 +270,12 @@ impl MokyApp {
         ui.label(RichText::new("Tous vos serveurs. Une seule destination.").size(14.0).color(MUTED));
         ui.add_space(24.0);
 
+        let current_profile = self.profile.clone();
+        let mut logout_clicked = false;
         panel(ui, |ui| {
             ui.label(RichText::new("COMPTE MINECRAFT").size(10.0).strong().color(MUTED));
             ui.add_space(12.0);
-            if let Some(profile) = &self.profile {
+            if let Some(profile) = current_profile.as_ref() {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.label(RichText::new(&profile.name).size(19.0).strong().color(TEXT));
@@ -281,8 +283,7 @@ impl MokyApp {
                     });
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         if ui.button("Déconnexion").clicked() {
-                            let _ = auth::sign_out();
-                            self.profile = None;
+                            logout_clicked = true;
                         }
                     });
                 });
@@ -308,6 +309,10 @@ impl MokyApp {
             }
         });
 
+        if logout_clicked {
+            let _ = auth::sign_out();
+            self.profile = None;
+        }
         if !self.status.is_empty() {
             ui.add_space(10.0);
             ui.label(RichText::new(&self.status).size(11.0).color(MUTED));
