@@ -206,32 +206,36 @@ impl eframe::App for MokyApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::new().fill(BG).inner_margin(egui::Margin::same(30)))
             .show(ctx, |ui| {
-                ui.vertical(|ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(egui_material_icons::icons::ICON_APPS);
-                        ui.add_space(12.0);
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new("MOKY").font(FontId::proportional(17.0)).strong().color(TEXT));
-                            ui.label(RichText::new("STUDIOS").font(FontId::proportional(10.0)).strong().color(TEXT));
+                if self.screen == Screen::Startup {
+                    self.startup_ui(ui);
+                } else {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui_material_icons::icons::ICON_APPS);
+                            ui.add_space(12.0);
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new("MOKY").font(FontId::proportional(17.0)).strong().color(TEXT));
+                                ui.label(RichText::new("STUDIOS").font(FontId::proportional(10.0)).strong().color(TEXT));
+                            });
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                pill(ui, "OFFICIAL", Color32::WHITE);
+                            });
                         });
-                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            pill(ui, "OFFICIAL", Color32::WHITE);
-                        });
-                    });
 
-                    ui.add_space(34.0);
-                    match self.screen {
-                        Screen::Installer => self.installer_ui(ui, ctx),
-                        Screen::Installing => self.installing_ui(ui),
-                        Screen::Startup => self.startup_ui(ui),
-                        Screen::Launcher => self.launcher_ui(ui, ctx),
-                    }
-                    ui.add_space(20.0);
-                    ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
-                        ui.label(RichText::new(format!("MOKY STUDIOS  •  VERSION {}", self.version))
-                            .size(10.0).strong().color(MUTED));
+                        ui.add_space(34.0);
+                        match self.screen {
+                            Screen::Installer => self.installer_ui(ui, ctx),
+                            Screen::Installing => self.installing_ui(ui),
+                            Screen::Launcher => self.launcher_ui(ui, ctx),
+                            Screen::Startup => unreachable!(),
+                        }
+                        ui.add_space(20.0);
+                        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
+                            ui.label(RichText::new(format!("MOKY STUDIOS  •  VERSION {}", self.version))
+                                .size(10.0).strong().color(MUTED));
+                        });
                     });
-                });
+                }
             });
     }
 }
