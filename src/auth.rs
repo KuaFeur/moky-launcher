@@ -7,7 +7,6 @@ use std::{
     error::Error,
     io::{Read, Write},
     net::TcpListener,
-    process::Command,
     thread,
     time::{Duration, Instant},
 };
@@ -135,18 +134,7 @@ fn random_url_token() -> String {
 }
 
 fn open_browser(url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
-    #[cfg(target_os = "windows")]
-    {
-        Command::new("explorer.exe").arg(url).spawn()?;
-    }
-    #[cfg(target_os = "macos")]
-    {
-        Command::new("open").arg(url).spawn()?;
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        Command::new("xdg-open").arg(url).spawn()?;
-    }
+    open::that(url)?;
     Ok(())
 }
 
