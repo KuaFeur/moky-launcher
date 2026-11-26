@@ -8,6 +8,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::Command,
+    io::Read,
     time::Duration,
 };
 
@@ -124,7 +125,12 @@ fn download_sodium(client: &Client, mods_dir: &Path, minecraft_version: &str, re
     temporary.as_file_mut().sync_all()?;
     let mut hasher = Sha512::new();
     let mut input = fs::File::open(temporary.path())?;
-    std::io::copy(&mut input, &mut hasher)?;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let count = input.read(&mut buffer)?;
+        if count == 0 { break; }
+        hasher.update(&buffer[..count]);
+    }
     let actual = format!("{:x}", hasher.finalize());
     if !actual.eq_ignore_ascii_case(&file.hashes.sha512) {
         return Err("La vérification SHA-512 de Sodium a échoué".into());
