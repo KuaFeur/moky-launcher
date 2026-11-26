@@ -55,6 +55,7 @@ enum Event {
     GameStatus(String),
     GameFailed(String),
     GameStarted,
+    SkinLoaded(Vec<u8>),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -82,6 +83,7 @@ struct MokyApp {
     settings_open: bool,
     servers_open: bool,
     game_busy: bool,
+    skin_texture: Option<egui::TextureHandle>,
 }
 
 impl MokyApp {
@@ -107,6 +109,7 @@ impl MokyApp {
             settings_open: false,
             servers_open: false,
             game_busy: false,
+            skin_texture: None,
         };
 
         if installed {
@@ -149,6 +152,19 @@ impl MokyApp {
                 );
             }
         });
+    }
+
+    fn load_skin_async(&self, profile: &auth::MinecraftProfile) {
+        if let Some(url) = profile.skin_url.clone() {
+            let tx = self.sender.clone();
+            thread::spawn(move || {
+                if let Ok(response) = reqwest::blocking::Client::new().get(url).send() {
+                    if let Ok(response) = response.error_for_status() {
+                        if let Ok(bytes) = response.bytes() { let _ = tx.send(Event::SkinLoaded(bytes.to_vec())); }
+                    }
+                }
+            });
+        }
     }
 
     fn start_update_check(&mut self) {
@@ -206,6 +222,7 @@ impl MokyApp {
                     if self.session_checked { self.open_session_screen(ctx); }
                 },
                 Event::SessionRestored(profile) => {
+                    if let Some(ref profile) = profile { self.load_skin_async(profile); }
                     self.profile = profile;
                     self.session_checked = true;
                     if self.startup_finished { self.open_session_screen(ctx); }
@@ -217,6 +234,7 @@ impl MokyApp {
                     if self.startup_finished { self.open_session_screen(ctx); }
                 },
                 Event::Authenticated(profile) => {
+                    self.load_skin_async(&profile);
                     self.profile = Some(profile);
                     self.session_checked = true;
                     self.auth_busy = false;
@@ -230,6 +248,14 @@ impl MokyApp {
                 Event::GameStatus(status) => { self.status = status; },
                 Event::GameFailed(error) => { self.game_busy = false; self.status = error; },
                 Event::GameStarted => { self.game_busy = false; self.status = "Minecraft est lancé".into(); },
+                Event::SkinLoaded(bytes) => {
+                    if let Ok(decoded) = image::load_from_memory(&bytes) {
+                        let rgba = decoded.to_rgba8();
+                        let size = [rgba.width() as usize, rgba.height() as usize];
+                        let image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+                        self.skin_texture = Some(ctx.load_texture("minecraft-skin", image, egui::TextureOptions::NEAREST));
+                    }
+                },
             }
             ctx.request_repaint();
         }
@@ -478,14 +504,19 @@ impl MokyApp {
             ui.add_space(18.0);
             ui.vertical(|ui| {
                 ui.add_space(10.0);
-                let avatar = egui::Button::new(
-                    RichText::new("◈").size(23.0).strong().color(TEXT)
-                ).fill(Color32::from_rgba_unmultiplied(12,12,12,235))
-                 .stroke(Stroke::new(1.0, Color32::from_gray(85)))
-                 .corner_radius(egui::CornerRadius::same(9));
-                if ui.add_sized(Vec2::splat(48.0), avatar).on_hover_text(
-                    format!("Compte Minecraft : {} — Paramètres", profile.name)
-                ).clicked() {
+                let (avatar_rect, avatar_response) = ui.allocate_exact_size(Vec2::splat(48.0), egui::Sense::click());
+                ui.painter().rect_filled(avatar_rect, egui::CornerRadius::same(9), Color32::from_rgb(16,16,16));
+                ui.painter().rect_stroke(avatar_rect, egui::CornerRadius::same(9), Stroke::new(1.0, Color32::from_gray(85)), egui::StrokeKind::Inside);
+                if let Some(texture) = &self.skin_texture {
+                    let inset = avatar_rect.shrink(5.0);
+                    let face_uv = egui::Rect::from_min_max(egui::pos2(8.0/64.0, 8.0/64.0), egui::pos2(16.0/64.0, 16.0/64.0));
+                    let hat_uv = egui::Rect::from_min_max(egui::pos2(40.0/64.0, 8.0/64.0), egui::pos2(48.0/64.0, 16.0/64.0));
+                    ui.painter().image(texture.id(), inset, face_uv, Color32::WHITE);
+                    ui.painter().image(texture.id(), inset, hat_uv, Color32::WHITE);
+                } else {
+                    ui.painter().text(avatar_rect.center(), egui::Align2::CENTER_CENTER, "◈", FontId::proportional(23.0), TEXT);
+                }
+                if avatar_response.on_hover_text(format!("Compte Minecraft : {} — Paramètres", profile.name)).clicked() {
                     self.settings_open = !self.settings_open;
                 }
                 ui.add_space(28.0);
