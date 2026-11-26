@@ -23,9 +23,10 @@ Chaque release doit contenir deux fichiers :
 
 - Chaque pull request compile le projet sur Windows x64.
 - Chaque push sur `main` compile et publie l'artefact de build.
-- Chaque tag au format `vX.Y.Z` publie les deux exécutables dans une GitHub Release.
+- Chaque push sur `main` publie automatiquement une GitHub Release correspondant à la version de `Cargo.toml`.
+- Chaque tag au format `vX.Y.Z` publie également les deux exécutables dans une GitHub Release.
 
-Pour publier une version, mettre à jour le champ `version` de `Cargo.toml`, puis créer un tag identique préfixé par `v` (par exemple `v0.1.0-alpha.2`).
+Pour publier une version, mettre à jour le champ `version` de `Cargo.toml`, puis fusionner les changements dans `main`. La CI crée la release `v` correspondante automatiquement.
 
 ## Développement
 
