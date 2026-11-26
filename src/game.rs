@@ -63,7 +63,7 @@ fn private_java() -> PathBuf {
         .join("java.exe")
 }
 
-fn install_neoforge(client: &Client, root: &Path, minecraft_version: &str, report: &impl Fn(String)) -> Result<String, Box<dyn Error + Send + Sync>> {
+fn install_neoforge(client: &Client, root: &Path, minecraft_version: &str, report: &impl Fn(String)) -> std::result::Result<String, Box<dyn Error + Send + Sync>> {
     let metadata = client.get(NEOFORGE_METADATA).send()?.error_for_status()?.text()?;
     let prefix = format!("{minecraft_version}.");
     let mut versions: Vec<(Vec<u64>, String)> = metadata.split("<version>").skip(1)
@@ -107,7 +107,7 @@ fn install_neoforge(client: &Client, root: &Path, minecraft_version: &str, repor
     Ok(profile_id)
 }
 
-fn download_sodium(client: &Client, mods_dir: &Path, minecraft_version: &str, report: &impl Fn(String)) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn download_sodium(client: &Client, mods_dir: &Path, minecraft_version: &str, report: &impl Fn(String)) -> std::result::Result<(), Box<dyn Error + Send + Sync>> {
     fs::create_dir_all(mods_dir)?;
     let versions: Vec<ModrinthVersion> = client
         .get(SODIUM_VERSIONS_API)
@@ -170,7 +170,7 @@ fn download_sodium(client: &Client, mods_dir: &Path, minecraft_version: &str, re
 pub fn launch_minecraft(
     profile: MinecraftProfile,
     report: impl Fn(String) + Send + 'static,
-) -> Result<(), String> {
+) -> std::result::Result<(), String> {
     let result = (|| -> Result<(), Box<dyn Error + Send + Sync>> {
         let fresh_profile = crate::auth::restore_session()
             .map_err(std::io::Error::other)?
@@ -214,7 +214,7 @@ pub fn launch_minecraft(
         let process = Command::new(&command.executable)
             .args(&command.args)
             .current_dir(&command.working_dir)
-            .envs(&command.env)
+            .envs(command.env.iter().cloned())
             .spawn()?;
         // Do not block the UI while the game is running. Keep the child detached.
         drop(process);
