@@ -1,6 +1,6 @@
 [package]
 name = "moky-launcher"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 edition = "2021"
 description = "Official Minecraft launcher for Moky Studios"
 
