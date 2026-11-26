@@ -12,6 +12,7 @@ use std::{
 
 const GAME_VERSION_MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 const SODIUM_VERSIONS_API: &str = "https://api.modrinth.com/v2/project/sodium/version";
+const NEOFORGE_METADATA: &str = "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml";
 
 #[derive(Deserialize)]
 struct VersionManifest {
@@ -52,7 +53,41 @@ fn private_java() -> PathBuf {
         .join("runtime")
         .join("java-25")
         .join("bin")
-        .join("javaw.exe")
+        .join("java.exe")
+}
+
+fn install_neoforge(client: &Client, root: &Path, minecraft_version: &str, report: &impl Fn(String)) -> Result<String, Box<dyn Error + Send + Sync>> {
+    let metadata = client.get(NEOFORGE_METADATA).send()?.error_for_status()?.text()?;
+    let prefix = format!("{minecraft_version}.");
+    let mut versions: Vec<semver::Version> = metadata.split("<version>").skip(1)
+        .filter_map(|part| part.split("</version>").next())
+        .filter(|version| version.starts_with(&prefix))
+        .filter_map(|version| semver::Version::parse(version).ok()).collect();
+    versions.sort();
+    let version = versions.last().ok_or("Aucune version stable NeoForge n'est publiée pour cette version de Minecraft")?.to_string();
+    let profile_id = format!("neoforge-{version}");
+    let profile_json = root.join("versions").join(&profile_id).join(format!("{profile_id}.json"));
+    if profile_json.is_file() { report(format!("NeoForge {version} est déjà installé")); return Ok(profile_id); }
+    report(format!("Téléchargement de NeoForge {version}…"));
+    let installer_dir = root.join("versions").join(".installers");
+    fs::create_dir_all(&installer_dir)?;
+    let installer = installer_dir.join(format!("neoforge-{version}-installer.jar"));
+    if !installer.is_file() {
+        let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{version}/neoforge-{version}-installer.jar");
+        let mut response = client.get(url).send()?.error_for_status()?;
+        let mut output = fs::File::create(&installer)?;
+        std::io::copy(&mut response, &mut output)?;
+        if fs::metadata(&installer)?.len() < 1024 { let _ = fs::remove_file(&installer); return Err("L'installateur NeoForge téléchargé est invalide".into()); }
+    }
+    report("Installation de NeoForge…".into());
+    let java = private_java();
+    if !java.is_file() { return Err("Java 25 privé est introuvable. Relancez Moky Launcher pour réparer Java.".into()); }
+    let output = Command::new(java).arg("-jar").arg(&installer).arg("--installClient").arg("--gameDir").arg(root).output()?;
+    if !output.status.success() {
+        return Err(format!("L'installation NeoForge a échoué : {} {}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr)).into());
+    }
+    if !profile_json.is_file() { return Err("NeoForge a terminé sans créer le profil attendu".into()); }
+    Ok(profile_id)
 }
 
 fn download_sodium(client: &Client, mods_dir: &Path, minecraft_version: &str, report: &impl Fn(String)) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -102,15 +137,12 @@ pub fn launch_minecraft(
         let minecraft_version = manifest.latest.release;
         report(format!("Installation de Minecraft {minecraft_version}…"));
         let launcher = Launcher::new(&root);
-        let installed = launcher.install(InstallRequest {
-            minecraft_version: minecraft_version.clone(),
-            loader: Some(LoaderSpec::NeoForge { version: LoaderVersion::LatestStable }),
-            java: JavaInstallPolicy::Never,
-        })?;
+        launcher.install(InstallRequest::vanilla(minecraft_version.clone()))?;
+        let neoforge_profile = install_neoforge(&client, &root, &minecraft_version, &report)?;
         let mods_dir = root.join("mods");
         download_sodium(&client, &mods_dir, &minecraft_version, &report)?;
         report("Préparation du lancement…".into());
-        let version = launcher.load_version(&installed.version_id)?;
+        let version = launcher.load_version(&neoforge_profile)?;
         let java = private_java();
         if !java.is_file() {
             return Err("Java 25 privé est introuvable. Fermez puis relancez Moky Launcher pour réparer son installation.".into());
@@ -126,7 +158,7 @@ pub fn launch_minecraft(
             ..Default::default()
         };
         let command = launcher.build_launch_command_from_version(&version, options)?;
-        let mut process = Command::new(&command.executable)
+        let process = Command::new(&command.executable)
             .args(&command.args)
             .current_dir(&command.working_dir)
             .envs(&command.env)
