@@ -60,6 +60,7 @@ enum Screen {
     Installing,
     Startup,
     Launcher,
+    Auth,
 }
 
 struct MokyApp {
@@ -73,6 +74,7 @@ struct MokyApp {
     profile: Option<auth::MinecraftProfile>,
     auth_busy: bool,
     startup_progress: f32,
+    settings_open: bool,
 }
 
 impl MokyApp {
@@ -93,6 +95,7 @@ impl MokyApp {
             profile: None,
             auth_busy: false,
             startup_progress: 0.0,
+            settings_open: false,
         };
 
         if installed {
@@ -170,9 +173,9 @@ impl MokyApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(620.0, 650.0)));
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
                 },
-                Event::SessionRestored(profile) => self.profile = profile,
-                Event::Authenticated(profile) => { self.profile = Some(profile); self.auth_busy = false; },
-                Event::AuthFailed(error) => { self.auth_busy = false; self.status = error; },
+                Event::SessionRestored(profile) => { self.profile = profile; if self.profile.is_none() { self.screen = Screen::Auth; ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(760.0, 560.0))); } },
+                Event::Authenticated(profile) => { self.profile = Some(profile); self.auth_busy = false; self.status.clear(); self.screen = Screen::Launcher; ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0))); },
+                Event::AuthFailed(error) => { self.auth_busy = false; self.status = error; self.screen = Screen::Auth; },
             }
             ctx.request_repaint();
         }
@@ -199,181 +202,60 @@ impl MokyApp {
 }
 
 impl eframe::App for MokyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.poll_events(ctx);
-        ctx.request_repaint_after(Duration::from_millis(180));
-
-        egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(BG).inner_margin(egui::Margin::same(30)))
-            .show(ctx, |ui| {
-                if self.screen == Screen::Startup {
-                    self.startup_ui(ui);
-                } else {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui_material_icons::icons::ICON_APPS);
-                            ui.add_space(12.0);
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new("MOKY").font(FontId::proportional(17.0)).strong().color(TEXT));
-                                ui.label(RichText::new("STUDIOS").font(FontId::proportional(10.0)).strong().color(TEXT));
-                            });
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                pill(ui, "OFFICIAL", Color32::WHITE);
-                            });
-                        });
-
-                        ui.add_space(34.0);
-                        match self.screen {
-                            Screen::Installer => self.installer_ui(ui, ctx),
-                            Screen::Installing => self.installing_ui(ui),
-                            Screen::Launcher => self.launcher_ui(ui, ctx),
-                            Screen::Startup => unreachable!(),
-                        }
-                        ui.add_space(20.0);
-                        ui.with_layout(Layout::bottom_up(Align::Center), |ui| {
-                            ui.label(RichText::new(format!("MOKY STUDIOS  •  VERSION {}", self.version))
-                                .size(10.0).strong().color(MUTED));
-                        });
-                    });
-                }
-            });
-    }
+ fn update(&mut self,ctx:&egui::Context,_frame:&mut eframe::Frame){
+  self.poll_events(ctx); ctx.request_repaint_after(Duration::from_millis(180));
+  let screen=self.screen;
+  egui::CentralPanel::default().frame(egui::Frame::new().fill(BG).inner_margin(egui::Margin::same(0))).show(ctx,|ui|{
+   match screen { Screen::Startup=>self.startup_ui(ui),Screen::Auth=>self.auth_ui(ui),Screen::Installer=>self.installer_ui(ui,ctx),Screen::Installing=>self.installing_ui(ui),Screen::Launcher=>self.launcher_ui(ui,ctx) }
+  });
+ }
 }
-
 impl MokyApp {
-    fn startup_ui(&self, ui: &mut egui::Ui) {
-        ui.vertical_centered(|ui| {
-            ui.add_space(12.0);
-            ui.label(RichText::new("MOKY STUDIOS").size(10.0).strong().color(MUTED));
-            ui.add_space(8.0);
-            ui.label(RichText::new("Moky Launcher").size(22.0).strong().color(TEXT));
-            ui.add_space(8.0);
-            let label = if self.startup_progress > 0.0 {
-                "Téléchargement de la mise à jour…"
-            } else {
-                "Recherche des mises à jour…"
-            };
-            ui.label(RichText::new(label).size(12.0).color(MUTED));
-            ui.add_space(14.0);
-            ui.add(egui::ProgressBar::new(self.startup_progress)
-                .desired_width(330.0)
-                .text(format!("{:.0}%", self.startup_progress * 100.0))
-                .animate(true)
-                .fill(Color32::WHITE));
-        });
+ fn startup_ui(&self,ui:&mut egui::Ui){
+  ui.vertical_centered(|ui|{ui.add_space(34.0);ui.label(RichText::new("M O K Y   S T U D I O S").size(10.0).strong().color(MUTED));ui.add_space(12.0);ui.label(RichText::new("Moky Launcher").size(25.0).strong().color(TEXT));ui.add_space(10.0);ui.label(RichText::new(if self.startup_progress>0.0{"Téléchargement de la mise à jour"}else{"Vérification de votre version"}).size(12.0).color(MUTED));ui.add_space(18.0);ui.add(egui::ProgressBar::new(self.startup_progress).desired_width(310.0).animate(true).fill(Color32::WHITE));});
+ }
+ fn auth_ui(&mut self,ui:&mut egui::Ui){
+  ui.horizontal(|ui|{
+   ui.vertical(|ui|{ui.set_width(300.0);ui.add_space(72.0);ui.label(RichText::new("M O K Y   S T U D I O S").size(11.0).strong().color(MUTED));ui.add_space(28.0);ui.label(RichText::new("Le jeu.\nÀ votre façon.").size(38.0).strong().color(TEXT));ui.add_space(16.0);ui.label(RichText::new("Retrouvez vos univers Minecraft au même endroit.").size(14.0).color(MUTED));ui.add_space(38.0);panel(ui,|ui|{ui.label(RichText::new("VOTRE COMPTE").size(9.0).strong().color(MUTED));ui.add_space(8.0);ui.label(RichText::new("Une connexion. Toute votre progression.").size(16.0).strong().color(TEXT));ui.add_space(6.0);ui.label(RichText::new("Connectez le compte Microsoft qui possède Minecraft: Java Edition.").size(12.0).color(MUTED));});});
+   ui.add_space(30.0);
+   ui.vertical_centered(|ui|{ui.add_space(82.0);egui::Frame::new().fill(PANEL).stroke(Stroke::new(1.0,Color32::from_rgb(48,48,48))).corner_radius(egui::CornerRadius::same(20)).inner_margin(egui::Margin::same(26)).show(ui,|ui|{
+    ui.set_min_width(300.0);ui.label(RichText::new("BON RETOUR").size(10.0).strong().color(MUTED));ui.add_space(12.0);ui.label(RichText::new("Connectez-vous").size(25.0).strong().color(TEXT));ui.add_space(8.0);ui.label(RichText::new("Utilisez votre compte Microsoft pour continuer.").size(12.0).color(MUTED));ui.add_space(26.0);
+    let b=egui::Button::new(RichText::new(if self.auth_busy{"Connexion en cours…"}else{"Continuer avec Microsoft"}).size(13.0).strong().color(Color32::BLACK)).fill(Color32::WHITE).stroke(Stroke::NONE).corner_radius(egui::CornerRadius::same(10)).min_size(Vec2::new(ui.available_width(),48.0));
+    if ui.add_enabled(!self.auth_busy,b).clicked(){self.auth_busy=true;self.status.clear();let tx=self.sender.clone();thread::spawn(move||match auth::sign_in(){Ok(p)=>{let _=tx.send(Event::Authenticated(p));},Err(e)=>{let _=tx.send(Event::AuthFailed(e));}});}
+    if self.auth_busy{ui.add_space(12.0);ui.spinner();}
+    if !self.status.is_empty(){ui.add_space(14.0);ui.label(RichText::new(&self.status).size(11.0).color(Color32::from_rgb(235,130,130)));}
+    ui.add_space(18.0);ui.label(RichText::new("Authentification sécurisée par Microsoft.").size(10.0).color(MUTED));
+   });});
+  });
+ }
+ fn installer_ui(&mut self,ui:&mut egui::Ui,ctx:&egui::Context){
+  ui.vertical_centered(|ui|{ui.add_space(70.0);ui.label(RichText::new("M O K Y   S T U D I O S").size(11.0).strong().color(MUTED));ui.add_space(24.0);ui.label(RichText::new("Moky Launcher").size(38.0).strong().color(TEXT));ui.add_space(10.0);ui.label(RichText::new("Tous vos univers Minecraft, réunis.").size(14.0).color(MUTED));ui.add_space(46.0);panel(ui,|ui|{ui.set_min_width(420.0);ui.label(RichText::new("EMPLACEMENT D’INSTALLATION").size(9.0).strong().color(MUTED));ui.add_space(8.0);ui.label(RichText::new(self.install_path.display().to_string()).size(12.0).color(TEXT));});ui.add_space(24.0);if primary_button(ui,"Installer Moky Launcher"){self.install(ctx);}if let Some(e)=&self.install_error{ui.label(RichText::new(e).size(11.0).color(Color32::LIGHT_RED));}});
+ }
+ fn installing_ui(&mut self,ui:&mut egui::Ui){ui.vertical_centered(|ui|{ui.add_space(110.0);ui.spinner();ui.add_space(22.0);ui.label(RichText::new("Installation en cours").size(26.0).strong().color(TEXT));ui.add_space(8.0);ui.label(RichText::new("Préparation de votre espace de jeu…").size(13.0).color(MUTED));ui.add_space(24.0);ui.add(egui::ProgressBar::new(0.65).desired_width(360.0).fill(Color32::WHITE));});}
+ fn launcher_ui(&mut self,ui:&mut egui::Ui,_ctx:&egui::Context){
+  let profile=self.profile.clone();let mut logout=false;
+  ui.horizontal(|ui|{
+   ui.vertical(|ui|{ui.set_width(205.0);ui.set_min_height(ui.available_height());egui::Frame::new().fill(Color32::from_rgb(8,8,8)).inner_margin(egui::Margin{left:22,right:16,top:26,bottom:20}).show(ui,|ui|{
+    ui.label(RichText::new("M O K Y").size(17.0).strong().color(TEXT));ui.label(RichText::new("S T U D I O S").size(9.0).strong().color(MUTED));ui.add_space(48.0);ui.label(RichText::new("ESPACE DE JEU").size(9.0).strong().color(MUTED));ui.add_space(12.0);
+    egui::Frame::new().fill(Color32::from_rgb(32,32,32)).corner_radius(egui::CornerRadius::same(9)).inner_margin(egui::Margin::symmetric(12,10)).show(ui,|ui|{ui.horizontal(|ui|{ui.label(egui_material_icons::icons::ICON_HOME);ui.label(RichText::new("Accueil").size(12.0).strong().color(TEXT));});});
+    ui.add_space(12.0);ui.horizontal(|ui|{ui.label(egui_material_icons::icons::ICON_APPS);ui.label(RichText::new("Serveurs").size(12.0).color(MUTED));});
+    ui.add_space(10.0);if ui.add(egui::Button::new(RichText::new("  Paramètres").size(12.0).color(MUTED)).fill(Color32::TRANSPARENT).stroke(Stroke::NONE)).clicked(){self.settings_open=!self.settings_open;}
+    ui.with_layout(Layout::bottom_up(Align::Min),|ui|{ui.label(RichText::new(format!("VERSION {}",self.version)).size(9.0).color(MUTED));if let Some(p)=profile.as_ref(){ui.add_space(8.0);ui.label(RichText::new(&p.name).size(11.0).strong().color(TEXT));ui.label(RichText::new("COMPTE MICROSOFT").size(8.0).color(MUTED));}});
+   });});
+   ui.vertical(|ui|{ui.set_min_width(ui.available_width());ui.set_min_height(ui.available_height());ui.add_space(28.0);ui.horizontal(|ui|{ui.label(RichText::new(if self.settings_open{"PARAMÈTRES"}else{"VOTRE ESPACE"}).size(10.0).strong().color(MUTED));ui.with_layout(Layout::right_to_left(Align::Center),|ui|{if let Some(p)=profile.as_ref(){ui.label(RichText::new(&p.name).size(11.0).strong().color(TEXT));ui.label(egui_material_icons::icons::ICON_ACCOUNT_CIRCLE);}});});ui.add_space(26.0);
+    if self.settings_open{ui.label(RichText::new("Paramètres").size(30.0).strong().color(TEXT));ui.add_space(18.0);panel(ui,|ui|{ui.label(RichText::new("COMPTE MINECRAFT").size(9.0).strong().color(MUTED));ui.add_space(12.0);if let Some(p)=profile.as_ref(){ui.label(RichText::new(&p.name).size(18.0).strong().color(TEXT));ui.label(RichText::new(&p.id).size(10.0).color(MUTED));ui.add_space(12.0);if ui.button("Se déconnecter").clicked(){logout=true;}}});}
+    else{
+     ui.label(RichText::new("Prêt à jouer ?").size(34.0).strong().color(TEXT));ui.add_space(6.0);ui.label(RichText::new("Choisissez votre univers et retrouvez votre communauté.").size(13.0).color(MUTED));ui.add_space(26.0);
+     egui::Frame::new().fill(Color32::from_rgb(17,17,17)).stroke(Stroke::new(1.0,Color32::from_rgb(42,42,42))).corner_radius(egui::CornerRadius::same(20)).inner_margin(egui::Margin::same(26)).show(ui,|ui|{ui.set_min_height(210.0);ui.horizontal(|ui|{ui.vertical(|ui|{ui.label(RichText::new("MOKY STUDIOS").size(9.0).strong().color(MUTED));ui.add_space(14.0);ui.label(RichText::new("Votre prochaine\naventure commence ici.").size(28.0).strong().color(TEXT));ui.add_space(10.0);ui.label(RichText::new("Un launcher unique pour les serveurs Moky Studios.").size(12.0).color(MUTED));});ui.with_layout(Layout::right_to_left(Align::Center),|ui|{let(r,_)=ui.allocate_exact_size(Vec2::new(150.0,150.0),egui::Sense::hover());let p=ui.painter();p.circle_stroke(r.center(),64.0,Stroke::new(1.0,Color32::from_gray(75)));p.circle_stroke(r.center(),48.0,Stroke::new(1.0,Color32::from_gray(105)));p.circle_filled(r.center(),28.0,Color32::from_gray(220));p.circle_filled(r.center(),12.0,Color32::from_gray(30));});});});
+     ui.add_space(20.0);ui.label(RichText::new("SÉLECTION DU SERVEUR").size(9.0).strong().color(MUTED));ui.add_space(10.0);panel(ui,|ui|{ui.horizontal(|ui|{ui.label(egui_material_icons::icons::ICON_LANGUAGE);ui.vertical(|ui|{ui.label(RichText::new("Aucun serveur configuré").size(14.0).strong().color(TEXT));ui.label(RichText::new("Les serveurs Moky Studios seront affichés ici.").size(11.0).color(MUTED));});});});ui.add_space(18.0);
+     let b=egui::Button::new(RichText::new("Sélectionnez un serveur pour jouer").size(13.0).strong().color(Color32::from_gray(110))).fill(Color32::from_gray(38)).stroke(Stroke::NONE).corner_radius(egui::CornerRadius::same(10)).min_size(Vec2::new(ui.available_width(),50.0));ui.add_enabled(false,b);
     }
-
-    fn installer_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.add_space(42.0);
-        ui.label(RichText::new("MOKY STUDIOS").size(11.0).strong().color(MUTED));
-        ui.add_space(12.0);
-        ui.label(RichText::new("Moky Launcher").size(34.0).strong().color(TEXT));
-        ui.add_space(8.0);
-        ui.label(RichText::new("L’installer officiel de vos serveurs Minecraft.").size(14.0).color(MUTED));
-        ui.add_space(42.0);
-
-        ui.horizontal(|ui| {
-            ui.label(egui_material_icons::icons::ICON_FOLDER);
-            ui.add_space(10.0);
-            ui.vertical(|ui| {
-                ui.label(RichText::new("Emplacement d’installation").size(12.0).strong().color(TEXT));
-                ui.label(RichText::new(self.install_path.display().to_string()).size(11.0).color(MUTED));
-            });
-        });
-
-        ui.add_space(28.0);
-        if primary_button(ui, "Installer") {
-            self.install(ctx);
-        }
-        if let Some(error) = &self.install_error {
-            ui.add_space(12.0);
-            ui.label(RichText::new(format!("Échec de l’installation : {error}")).color(Color32::LIGHT_RED).size(12.0));
-        }
-    }
-
-    fn installing_ui(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(60.0);
-        ui.vertical_centered(|ui| {
-            ui.spinner();
-            ui.add_space(22.0);
-            ui.label(RichText::new("Installation en cours…").size(26.0).strong().color(TEXT));
-            ui.add_space(8.0);
-            ui.label(RichText::new("Moky Launcher prépare votre espace de jeu.").color(MUTED));
-            ui.add_space(24.0);
-            ui.add(egui::ProgressBar::new(0.65).desired_width(360.0).fill(PURPLE).corner_radius(egui::CornerRadius::same(8)));
-            ui.add_space(12.0);
-            ui.label(RichText::new(&self.status).size(12.0).color(MUTED));
-        });
-    }
-
-    fn launcher_ui(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.label(RichText::new("BIENVENUE SUR").size(12.0).strong().color(PURPLE));
-        ui.label(RichText::new("Moky Launcher").size(34.0).strong().color(TEXT));
-        ui.add_space(8.0);
-        ui.label(RichText::new("Tous vos serveurs. Une seule destination.").size(14.0).color(MUTED));
-        ui.add_space(24.0);
-
-        let current_profile = self.profile.clone();
-        let mut logout_clicked = false;
-        panel(ui, |ui| {
-            ui.label(RichText::new("COMPTE MINECRAFT").size(10.0).strong().color(MUTED));
-            ui.add_space(12.0);
-            if let Some(profile) = current_profile.as_ref() {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(&profile.name).size(19.0).strong().color(TEXT));
-                        ui.label(RichText::new(format!("UUID : {}", profile.id)).size(10.0).color(MUTED));
-                    });
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if ui.button("Déconnexion").clicked() {
-                            logout_clicked = true;
-                        }
-                    });
-                });
-            } else if self.auth_busy {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new("Connexion à Microsoft…").size(13.0).color(MUTED));
-                });
-            } else {
-                ui.label(RichText::new("Connectez votre compte Microsoft pour accéder à Minecraft.").size(13.0).color(MUTED));
-                ui.add_space(10.0);
-                if primary_button(ui, "Se connecter avec Microsoft") {
-                    self.auth_busy = true;
-                    self.status.clear();
-                    let sender = self.sender.clone();
-                    thread::spawn(move || {
-                        match auth::sign_in() {
-                            Ok(profile) => { let _ = sender.send(Event::Authenticated(profile)); }
-                            Err(error) => { let _ = sender.send(Event::AuthFailed(error)); }
-                        }
-                    });
-                }
-            }
-        });
-
-        if logout_clicked {
-            let _ = auth::sign_out();
-            self.profile = None;
-        }
-        if !self.status.is_empty() {
-            ui.add_space(10.0);
-            ui.label(RichText::new(&self.status).size(11.0).color(MUTED));
-        }
-        ui.add_space(18.0);
-        panel(ui, |ui| {
-            ui.label(RichText::new("VOS UNIVERS").size(11.0).strong().color(PURPLE));
-            ui.add_space(8.0);
-            ui.label(RichText::new("Les serveurs Moky Studios arrivent bientôt.").size(16.0).strong().color(TEXT));
-            ui.label(RichText::new("Nous préparons votre espace de jeu.").size(12.0).color(MUTED));
-        });
-        ui.add_space(18.0);
-        if primary_button(ui, "Lancer Minecraft") {
-            self.status = "La sélection des serveurs sera disponible prochainement.".into();
-        }
-    }
+    ui.with_layout(Layout::bottom_up(Align::Min),|ui|{ui.label(RichText::new("MOKY STUDIOS").size(9.0).strong().color(MUTED));});
+   });
+  });
+  if logout{let _=auth::sign_out();self.profile=None;self.screen=Screen::Auth;self.settings_open=false;}
+ }
 }
-
 fn is_installed() -> bool {
     let path = installation_path().join("MokyLauncher.exe");
     env::current_exe().ok().and_then(|p| p.canonicalize().ok())
@@ -507,8 +389,8 @@ fn main() -> eframe::Result<()> {
     let startup_window = is_installed() && !env::args().any(|arg| arg == "--launch");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size(if startup_window { [420.0, 190.0] } else { [620.0, 650.0] })
-            .with_min_inner_size(if startup_window { [420.0, 190.0] } else { [560.0, 600.0] })
+            .with_inner_size(if startup_window { [420.0, 190.0] } else { [1080.0, 720.0] })
+            .with_min_inner_size(if startup_window { [420.0, 190.0] } else { [900.0, 650.0] })
             .with_resizable(false)
             .with_title(if startup_window { "Moky Launcher — Mise à jour" } else { "Moky Launcher — Moky Studios" }),
         ..Default::default()
