@@ -12,3 +12,8 @@ serde = { version = "1", features = ["derive"] }
 semver = "1"
 tempfile = "3"
 self-replace = "1"
+base64 = "0.22"
+rand = "0.8"
+sha2 = "0.10"
+url = "2"
+keyring = "3"
