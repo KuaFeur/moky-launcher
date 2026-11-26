@@ -50,7 +50,7 @@ enum Event {
     SessionRestoreFailed(String),
     Authenticated(auth::MinecraftProfile),
     AuthFailed(String),
-    DeviceCodeReady(String, String),
+    DeviceCodeReady(String, String, String),
     DownloadProgress(String, f32),
     JavaProgress(String, f32),
     GameStatus(String),
@@ -82,6 +82,7 @@ struct MokyApp {
     auth_busy: bool,
     auth_user_code: Option<String>,
     auth_verification_uri: Option<String>,
+    auth_qr_uri: Option<String>,
     startup_progress: f32,
     settings_open: bool,
     servers_open: bool,
@@ -109,6 +110,7 @@ impl MokyApp {
             auth_busy: false,
             auth_user_code: None,
             auth_verification_uri: None,
+            auth_qr_uri: None,
             startup_progress: 0.0,
             settings_open: false,
             servers_open: false,
@@ -246,6 +248,7 @@ impl MokyApp {
                     self.auth_busy = false;
                     self.auth_user_code = None;
                     self.auth_verification_uri = None;
+                    self.auth_qr_uri = None;
                     self.status.clear();
                     self.screen = Screen::Launcher;
                     ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(1080.0, 720.0)));
@@ -253,9 +256,10 @@ impl MokyApp {
                     ctx.send_viewport_cmd(egui::ViewportCommand::Title("Moky Launcher — Moky Studios".into()));
                 },
                 Event::AuthFailed(error) => { self.auth_busy = false; self.auth_user_code = None; self.auth_verification_uri = None; self.status = error; self.screen = Screen::Auth; },
-                Event::DeviceCodeReady(user_code, verification_uri) => {
+                Event::DeviceCodeReady(user_code, verification_uri, qr_uri) => {
                     self.auth_user_code = Some(user_code);
                     self.auth_verification_uri = Some(verification_uri);
+                    self.auth_qr_uri = Some(qr_uri);
                     self.status = "Validez le code dans la fenêtre Microsoft. Moky attend la confirmation…".into();
                 },
                 Event::GameStatus(status) => { self.status = status; },
@@ -445,7 +449,7 @@ impl MokyApp {
                             ui.add_space(4.0);
                             ui.horizontal(|ui| {
                                 if let Some(uri) = &self.auth_verification_uri {
-                                    draw_qr_code(ui, uri, 126.0);
+                                    draw_qr_code(ui, self.auth_qr_uri.as_deref().unwrap_or(uri), 126.0);
                                 }
                                 ui.add_space(12.0);
                                 ui.vertical(|ui| {
@@ -484,12 +488,14 @@ impl MokyApp {
             self.auth_busy = true;
             self.auth_user_code = None;
             self.auth_verification_uri = None;
+            self.auth_qr_uri = None;
             self.status = "Préparation de la connexion Microsoft…".into();
             let tx = self.sender.clone();
             thread::spawn(move || {
                 let result = (|| -> Result<auth::MinecraftProfile, String> {
                     let (device, device_secret, expires_in) = auth::start_device_sign_in()?;
-                    let _ = tx.send(Event::DeviceCodeReady(device.user_code, device.verification_uri));
+                    let qr_uri = device.verification_uri_complete.unwrap_or_else(|| device.verification_uri.clone());
+                    let _ = tx.send(Event::DeviceCodeReady(device.user_code, device.verification_uri, qr_uri));
                     auth::complete_device_sign_in(&device_secret, expires_in)
                 })();
                 match result {
