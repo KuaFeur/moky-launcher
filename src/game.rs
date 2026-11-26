@@ -66,12 +66,15 @@ fn private_java() -> PathBuf {
 fn install_neoforge(client: &Client, root: &Path, minecraft_version: &str, report: &impl Fn(String)) -> Result<String, Box<dyn Error + Send + Sync>> {
     let metadata = client.get(NEOFORGE_METADATA).send()?.error_for_status()?.text()?;
     let prefix = format!("{minecraft_version}.");
-    let mut versions: Vec<semver::Version> = metadata.split("<version>").skip(1)
+    let mut versions: Vec<(Vec<u64>, String)> = metadata.split("<version>").skip(1)
         .filter_map(|part| part.split("</version>").next())
         .filter(|version| version.starts_with(&prefix))
-        .filter_map(|version| semver::Version::parse(version).ok()).collect();
-    versions.sort();
-    let version = versions.last().ok_or("Aucune version stable NeoForge n'est publiée pour cette version de Minecraft")?.to_string();
+        .filter_map(|version| {
+            let components: Option<Vec<u64>> = version.split('.').map(|part| part.parse::<u64>().ok()).collect();
+            components.map(|numbers| (numbers, version.to_string()))
+        }).collect();
+    versions.sort_by(|left, right| left.0.cmp(&right.0));
+    let version = versions.last().ok_or("Aucune version stable NeoForge n'est publiée pour cette version de Minecraft")?.1.clone();
     let profile_id = format!("neoforge-{version}");
     let profile_json = root.join("versions").join(&profile_id).join(format!("{profile_id}.json"));
     if profile_json.is_file() { report(format!("NeoForge {version} est déjà installé")); return Ok(profile_id); }
