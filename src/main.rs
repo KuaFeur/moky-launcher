@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::{env, error::Error, fs, process::Command, thread, time::Duration};
+use std::{env, error::Error, io::Write, time::Duration};
 
 const REPOSITORY: &str = "KuaFeur/moky-launcher";
 const ASSET_NAME: &str = "moky-launcher-windows-x86_64.exe";
