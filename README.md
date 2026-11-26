@@ -28,7 +28,7 @@ git tag v0.1.1
 git push origin main --tags
 ```
 
-La CI compile alors le launcher et attache le fichier Windows à la release GitHub. Le launcher compare cette version avec celle de son exécutable, télécharge la nouvelle build et redémarre automatiquement.
+La CI compile alors le launcher et attache le fichier Windows à la release GitHub. Le launcher compare cette version avec celle de son exécutable et remplace le binaire installé. Sous Windows, le remplacement se finalise à la fermeture du processus ; le prochain démarrage utilise donc la nouvelle version.
 
 ## Développement
 
