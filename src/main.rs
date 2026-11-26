@@ -794,13 +794,24 @@ fn ensure_java_runtime(sender: &Sender<Event>) -> Result<String, Box<dyn Error +
     let client = reqwest::blocking::Client::builder().user_agent("MokyLauncher-JavaRuntime")
         .timeout(Duration::from_secs(90)).build()?;
     let _ = sender.send(Event::JavaProgress("Recherche de la dernière version de Java 25…".into(), 0.02));
-    let assets: Vec<AdoptiumAsset> = client.get(
-        "https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jre&os=windows&vendor=eclipse"
-    ).send()?.error_for_status()?.json()?;
-    let asset = assets.into_iter().next().ok_or("Aucune distribution Java 25 Windows x64 n'est disponible")?;
-    let version = asset.version.semver;
     let runtime = java_runtime_path();
     let marker = runtime.join(".adoptium-version");
+    let metadata_response = match client.get(
+        "https://api.adoptium.net/v3/assets/latest/25/hotspot?architecture=x64&image_type=jre&os=windows&vendor=eclipse"
+    ).send().and_then(|response| response.error_for_status()) {
+        Ok(response) => response,
+        Err(error) if runtime.join("bin").join("javaw.exe").is_file() => {
+            let installed = fs::read_to_string(&marker).unwrap_or_else(|_| "25".to_string());
+            let _ = sender.send(Event::JavaProgress(
+                format!("Java {installed} est conservé (serveur de mise à jour indisponible)"), 1.0
+            ));
+            return Ok(installed);
+        }
+        Err(error) => return Err(error.into()),
+    };
+    let assets: Vec<AdoptiumAsset> = metadata_response.json()?;
+    let asset = assets.into_iter().next().ok_or("Aucune distribution Java 25 Windows x64 n'est disponible")?;
+    let version = asset.version.semver;
     if runtime.join("bin").join("javaw.exe").is_file()
         && fs::read_to_string(&marker).ok().as_deref() == Some(version.as_str()) {
         let _ = sender.send(Event::JavaProgress(format!("Java {version} est déjà à jour"), 1.0));
@@ -827,16 +838,30 @@ fn ensure_java_runtime(sender: &Sender<Event>) -> Result<String, Box<dyn Error +
         return Err("La vérification SHA-256 de l'archive Java a échoué".into());
     }
     let _ = sender.send(Event::JavaProgress("Installation de l'environnement Java…".into(), 0.74));
-    let staging = tempfile::Builder::new().prefix("moky-java-extract-").tempdir()?;
+    let parent = runtime.parent().ok_or("Chemin Java invalide")?;
+    fs::create_dir_all(parent)?;
+    let staging = tempfile::Builder::new().prefix("moky-java-extract-").tempdir_in(parent)?;
     file.as_file_mut().sync_all()?;
     let mut archive = zip::ZipArchive::new(file.reopen()?)?;
     archive.extract(staging.path())?;
     let java_home = find_java_home(staging.path()).ok_or("L'archive Java ne contient pas bin/javaw.exe")?;
-    if runtime.exists() { fs::remove_dir_all(&runtime)?; }
-    if let Some(parent) = runtime.parent() { fs::create_dir_all(parent)?; }
-    fs::rename(java_home, &runtime)?;
-    fs::write(&marker, &version)?;
-    if !runtime.join("bin").join("javaw.exe").is_file() { return Err("L'installation de Java est incomplète".into()); }
+    let new_runtime = parent.join("java-25-new");
+    let backup_runtime = parent.join("java-25-backup");
+    if new_runtime.exists() { fs::remove_dir_all(&new_runtime)?; }
+    if backup_runtime.exists() { fs::remove_dir_all(&backup_runtime)?; }
+    fs::rename(java_home, &new_runtime)?;
+    fs::write(new_runtime.join(".adoptium-version"), &version)?;
+    if !new_runtime.join("bin").join("javaw.exe").is_file() {
+        fs::remove_dir_all(&new_runtime)?;
+        return Err("L'installation de Java est incomplète".into());
+    }
+    let had_runtime = runtime.exists();
+    if had_runtime { fs::rename(&runtime, &backup_runtime)?; }
+    if let Err(error) = fs::rename(&new_runtime, &runtime) {
+        if had_runtime { let _ = fs::rename(&backup_runtime, &runtime); }
+        return Err(error.into());
+    }
+    if backup_runtime.exists() { fs::remove_dir_all(&backup_runtime)?; }
     let _ = sender.send(Event::JavaProgress(format!("Java {version} installé"), 0.98));
     Ok(version)
 }
@@ -936,7 +961,7 @@ fn main() -> eframe::Result<()> {
         return Ok(());
     }
 
-    let startup_window = is_installed() && !env::args().any(|arg| arg == "--launch");
+    let startup_window = is_installed();
     let options = eframe::NativeOptions {
         centered: true,
         viewport: egui::ViewportBuilder::default()
