@@ -442,7 +442,6 @@ fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn E
         .ok_or("L’installateur Windows est absent de la dernière release GitHub")?;
     let mut response = client.get(&asset.browser_download_url).send()?.error_for_status()?;
     let total = response.content_length().unwrap_or(0);
-    if total == 0 { return Err("La taille du programme téléchargé est inconnue.".into()); }
     let mut downloaded = 0u64;
     let mut buffer = [0u8; 64 * 1024];
     let mut temporary_file = tempfile::Builder::new()
@@ -456,7 +455,7 @@ fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn E
         let _ = sender.send(Event::DownloadProgress(latest.to_string(), progress.clamp(0.0, 1.0)));
     }
     temporary_file.flush()?;
-    if downloaded != total {
+    if downloaded == 0 || (total > 0 && downloaded != total) {
         return Err("Le téléchargement du programme est incomplet.".into());
     }
     let mut signature = [0u8; 2];
