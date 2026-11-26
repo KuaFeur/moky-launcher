@@ -17,7 +17,7 @@ use std::{
 };
 
 const REPOSITORY: &str = "KuaFeur/moky-launcher";
-const ASSET_NAME: &str = "MokyLauncher-Setup.exe";
+const ASSET_NAME: &str = "MokyLauncher.exe";
 const APP_NAME: &str = "Moky Launcher";
 const BG: Color32 = Color32::BLACK;
 const PANEL: Color32 = Color32::from_rgb(10, 10, 10);
@@ -257,6 +257,7 @@ impl MokyApp {
             ui.add_space(14.0);
             ui.add(egui::ProgressBar::new(self.startup_progress)
                 .desired_width(330.0)
+                .text(format!("{:.0}%", self.startup_progress * 100.0))
                 .animate(true)
                 .fill(Color32::WHITE));
         });
@@ -441,6 +442,7 @@ fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn E
         .ok_or("L’installateur Windows est absent de la dernière release GitHub")?;
     let mut response = client.get(&asset.browser_download_url).send()?.error_for_status()?;
     let total = response.content_length().unwrap_or(0);
+    if total == 0 { return Err("La taille du programme téléchargé est inconnue.".into()); }
     let mut downloaded = 0u64;
     let mut buffer = [0u8; 64 * 1024];
     let mut temporary_file = tempfile::Builder::new()
@@ -454,6 +456,16 @@ fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn E
         let _ = sender.send(Event::DownloadProgress(latest.to_string(), progress.clamp(0.0, 1.0)));
     }
     temporary_file.flush()?;
+    if downloaded != total {
+        return Err("Le téléchargement du programme est incomplet.".into());
+    }
+    let mut signature = [0u8; 2];
+    use std::io::{Seek, SeekFrom};
+    temporary_file.as_file_mut().seek(SeekFrom::Start(0))?;
+    temporary_file.as_file_mut().read_exact(&mut signature)?;
+    if &signature != b"MZ" {
+        return Err("Le fichier téléchargé n’est pas un exécutable Windows valide.".into());
+    }
     self_replace::self_replace(temporary_file.path())?;
     Ok(Some(latest.to_string()))
 }
