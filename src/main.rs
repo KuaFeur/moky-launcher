@@ -90,8 +90,6 @@ impl MokyApp {
     fn new() -> Self {
         let install_path = installation_path();
         let installed = is_installed();
-        let skip_update = env::args().any(|arg| arg == "--launch");
-
         let (sender, receiver) = mpsc::channel();
         let mut app = Self {
             screen: if !installed { Screen::Installer } else { Screen::Startup },
