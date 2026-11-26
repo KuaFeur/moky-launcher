@@ -23,6 +23,7 @@ pub struct MinecraftProfile {
     pub id: String,
     pub name: String,
     pub skin_url: Option<String>,
+    pub access_token: String,
 }
 
 #[derive(Deserialize)]
@@ -329,6 +330,7 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         id: profile.id,
         name: profile.name,
         skin_url,
+        access_token: minecraft.access_token,
     })
 }
 
