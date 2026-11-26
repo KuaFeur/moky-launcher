@@ -82,12 +82,19 @@ fn install_neoforge(client: &Client, root: &Path, minecraft_version: &str, repor
     let installer_dir = root.join("versions").join(".installers");
     fs::create_dir_all(&installer_dir)?;
     let installer = installer_dir.join(format!("neoforge-{version}-installer.jar"));
-    if !installer.is_file() {
+    let installer_valid = fs::File::open(&installer).ok()
+        .and_then(|file| zip::ZipArchive::new(file).ok()).is_some();
+    if !installer_valid {
+        let _ = fs::remove_file(&installer);
         let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{version}/neoforge-{version}-installer.jar");
         let mut response = client.get(url).send()?.error_for_status()?;
         let mut output = fs::File::create(&installer)?;
         std::io::copy(&mut response, &mut output)?;
-        if fs::metadata(&installer)?.len() < 1024 { let _ = fs::remove_file(&installer); return Err("L'installateur NeoForge téléchargé est invalide".into()); }
+        output.sync_all()?;
+        if fs::File::open(&installer).ok().and_then(|file| zip::ZipArchive::new(file).ok()).is_none() {
+            let _ = fs::remove_file(&installer);
+            return Err("L'installateur NeoForge téléchargé est invalide ou incomplet".into());
+        }
     }
     report("Installation de NeoForge…".into());
     let java = private_java();
