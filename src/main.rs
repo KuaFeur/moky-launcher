@@ -215,8 +215,9 @@ impl MokyApp {
                     }
                     ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                 }
-                Event::Failed(_error) => {
+                Event::Failed(error) => {
                     self.startup_finished = true;
+                    self.status = error;
                     if self.session_checked { self.open_session_screen(ctx); }
                 },
                 Event::SessionRestored(profile) => {
@@ -568,10 +569,6 @@ impl MokyApp {
                     pill(ui, "SODIUM", Color32::WHITE);
                 });
                 ui.add_space(28.0);
-                let play = egui::Button::new(RichText::new("▶   JOUER").size(15.0).strong().color(Color32::BLACK))
-                    .fill(Color32::WHITE).stroke(Stroke::NONE)
-                    .corner_radius(egui::CornerRadius::same(7))
-                    .min_size(Vec2::new(224.0,60.0));
                 let play_label = if self.game_busy { "PRÉPARATION…" } else { "▶   JOUER" };
                 let play = egui::Button::new(RichText::new(play_label).size(15.0).strong().color(Color32::BLACK))
                     .fill(Color32::WHITE).stroke(Stroke::NONE)
