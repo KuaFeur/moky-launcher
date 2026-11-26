@@ -323,11 +323,13 @@ fn check_for_updates(sender: &Sender<Event>) -> Result<Option<String>, Box<dyn E
         .user_agent("MokyLauncher-Updater")
         .timeout(Duration::from_secs(60))
         .build()?;
-    let release: Release = client
-        .get(format!("https://api.github.com/repos/{REPOSITORY}/releases/latest"))
+    let releases: Vec<Release> = client
+        .get(format!("https://api.github.com/repos/{REPOSITORY}/releases?per_page=1"))
         .send()?
         .error_for_status()?
         .json()?;
+    let release = releases.into_iter().next()
+        .ok_or("Aucune release n’est encore disponible sur GitHub")?;
 
     let latest = semver::Version::parse(release.tag_name.trim_start_matches('v'))?;
     let current = semver::Version::parse(env!("CARGO_PKG_VERSION"))?;
