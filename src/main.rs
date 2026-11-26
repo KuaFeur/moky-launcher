@@ -575,64 +575,112 @@ fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
 
 fn draw_voxel_backdrop(ui: &mut egui::Ui, rect: egui::Rect, darkness: f32) {
     let painter = ui.painter();
-    painter.rect_filled(rect, 0.0, Color32::from_rgb(24, 28, 31));
+    let width = rect.width();
+    let height = rect.height();
+    let block = (width / 58.0).clamp(10.0, 22.0);
+    let columns = (width / block).ceil() as usize + 1;
+    let ground_y = rect.top() + height * 0.67;
 
-    let sky = Color32::from_rgb(47, 54, 59);
+    painter.rect_filled(rect, 0.0, Color32::from_rgb(63, 72, 77));
     painter.rect_filled(
-        egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.top() + rect.height() * 0.62)),
-        0.0, sky,
+        egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), rect.top() + height * 0.64)),
+        0.0, Color32::from_rgb(83, 94, 100),
     );
 
-    let base_y = rect.top() + rect.height() * 0.62;
-    let block = (rect.width() / 26.0).max(22.0);
-    let far = Color32::from_rgb(53, 61, 64);
-    let mid = Color32::from_rgb(39, 48, 48);
-    let near = Color32::from_rgb(27, 35, 33);
+    // Block-shaped clouds in the distance.
+    for (cx, cy, span) in [(0.12, 0.18, 5), (0.40, 0.12, 4), (0.76, 0.22, 6), (0.91, 0.10, 3)] {
+        let x = rect.left() + width * cx;
+        let y = rect.top() + height * cy;
+        for (dx, dy, w) in [(0, 1, 2), (1, 0, span), (2, 1, span - 1), (span - 1, 2, 2)] {
+            painter.rect_filled(
+                egui::Rect::from_min_size(
+                    egui::pos2(x + dx as f32 * block * 0.65, y + dy as f32 * block * 0.55),
+                    Vec2::new(w as f32 * block * 0.65, block * 0.48),
+                ),
+                0.0, Color32::from_rgb(126, 135, 137),
+            );
+        }
+    }
 
-    let peaks = [
-        (0.00, 0.35), (0.09, 0.25), (0.17, 0.39), (0.28, 0.20),
-        (0.39, 0.37), (0.50, 0.24), (0.61, 0.40), (0.73, 0.22),
-        (0.84, 0.34), (0.95, 0.19), (1.00, 0.29),
+    // Distant stepped mountain silhouettes.
+    let ridge = [
+        15,16,17,18,19,20,20,21,22,23,24,24,23,22,21,20,19,18,17,16,
+        15,14,13,12,12,13,14,15,16,17,18,19,20,21,22,23,22,21,20,19,
+        18,17,16,15,14,13,12,11,12,13,14,15,16,17,18,17,16,15,14
     ];
-    for pair in peaks.windows(2) {
-        let x1 = rect.left() + rect.width() * pair[0].0;
-        let x2 = rect.left() + rect.width() * pair[1].0;
-        let y1 = base_y - rect.height() * pair[0].1;
-        let y2 = base_y - rect.height() * pair[1].1;
-        painter.add(egui::Shape::convex_polygon(
-            vec![egui::pos2(x1, base_y), egui::pos2(x1, y1), egui::pos2((x1+x2)*0.5, y1.min(y2)-block*0.55), egui::pos2(x2, y2), egui::pos2(x2, base_y)],
-            far, Stroke::NONE,
-        ));
+    for col in 0..columns {
+        let h = ridge[col % ridge.len()] as f32 * block * 0.48;
+        let x = rect.left() + col as f32 * block;
+        for row in 0..((h / block).ceil() as usize) {
+            let y = ground_y - (row as f32 + 1.0) * block;
+            let shade = if row == (h / block).floor() as usize {
+                Color32::from_rgb(78, 91, 84)
+            } else if (col + row) % 4 == 0 {
+                Color32::from_rgb(66, 77, 78)
+            } else {
+                Color32::from_rgb(58, 69, 72)
+            };
+            painter.rect_filled(
+                egui::Rect::from_min_size(egui::pos2(x, y), Vec2::splat(block + 0.5)),
+                0.0, shade,
+            );
+        }
     }
 
-    for i in 0..28 {
-        let x = rect.left() + i as f32 * block * 1.05;
-        let h = block * (2.0 + ((i * 7) % 5) as f32);
-        let y = base_y + block * 0.15;
-        let w = block * 1.12;
-        painter.rect_filled(egui::Rect::from_min_size(egui::pos2(x, y), Vec2::new(w, h)), 0.0, mid);
-        painter.rect_filled(egui::Rect::from_min_size(egui::pos2(x, y), Vec2::new(w, block * 0.34)), 0.0, Color32::from_rgb(54, 67, 55));
-    }
-
-    for i in 0..22 {
-        let x = rect.left() + i as f32 * block * 1.38;
-        let y = base_y + block * (1.1 + ((i * 3) % 4) as f32);
-        let w = block * 1.42;
-        let h = block * (1.5 + ((i * 5) % 3) as f32);
-        painter.rect_filled(egui::Rect::from_min_size(egui::pos2(x, y), Vec2::new(w, h)), 0.0, near);
-    }
-
-    let alpha = (darkness.clamp(0.0, 1.0) * 220.0) as u8;
-    painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(0, 0, 0, alpha));
-    let gradient_height = rect.height() * 0.65;
-    for i in 0..12 {
-        let t = i as f32 / 12.0;
-        let y = rect.top() + t * gradient_height;
-        let h = gradient_height / 12.0 + 1.0;
-        let a = ((1.0 - t) * 48.0) as u8;
+    // Mid-ground forest: square canopies and straight trunks.
+    for (col, height_blocks, canopy) in [(5, 5, 3), (12, 7, 4), (22, 5, 3), (39, 6, 4), (48, 7, 4), (54, 5, 3)] {
+        let x = rect.left() + col as f32 * block;
+        let trunk_top = ground_y - height_blocks as f32 * block;
         painter.rect_filled(
-            egui::Rect::from_min_size(egui::pos2(rect.left(), y), Vec2::new(rect.width(), h)),
-            0.0, Color32::from_rgba_unmultiplied(0, 0, 0, a),
+            egui::Rect::from_min_size(egui::pos2(x + block * 0.35, trunk_top), Vec2::new(block * 0.42, block * height_blocks as f32)),
+            0.0, Color32::from_rgb(49, 43, 35),
+        );
+        let crown_y = trunk_top - canopy as f32 * block * 0.62;
+        for (dx, dy, w) in [(-1, 1, 3), (0, 0, 3), (1, 1, 3), (0, 2, 4)] {
+            painter.rect_filled(
+                egui::Rect::from_min_size(
+                    egui::pos2(x + dx as f32 * block * 0.58, crown_y + dy as f32 * block * 0.52),
+                    Vec2::new(w as f32 * block * 0.58, block * 0.72),
+                ),
+                0.0, Color32::from_rgb(47, 66, 52),
+            );
+        }
+    }
+
+    // Foreground terrain: grass surface over layered dirt blocks.
+    let front_y = ground_y + block * 2.0;
+    for col in 0..columns {
+        let x = rect.left() + col as f32 * block;
+        let bump = ((col * 7 + 3) % 4) as f32 * block * 0.22;
+        let surface = front_y - bump;
+        painter.rect_filled(
+            egui::Rect::from_min_size(egui::pos2(x, surface), Vec2::new(block + 0.5, block * 0.42)),
+            0.0, Color32::from_rgb(68, 84, 59),
+        );
+        for row in 0..8 {
+            let y = surface + block * 0.42 + row as f32 * block;
+            if y > rect.bottom() { break; }
+            let color = if row < 2 {
+                Color32::from_rgb(67, 58, 45)
+            } else {
+                Color32::from_rgb(45, 48, 43)
+            };
+            painter.rect_filled(
+                egui::Rect::from_min_size(egui::pos2(x, y), Vec2::splat(block + 0.5)),
+                0.0, color,
+            );
+        }
+    }
+
+    // Darken the scene without flattening its block geometry.
+    let alpha = (darkness.clamp(0.0, 1.0) * 205.0) as u8;
+    painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(0, 0, 0, alpha));
+    for i in 0..14 {
+        let t = i as f32 / 14.0;
+        let y = rect.top() + t * height * 0.7;
+        painter.rect_filled(
+            egui::Rect::from_min_size(egui::pos2(rect.left(), y), Vec2::new(width, height * 0.7 / 14.0 + 1.0)),
+            0.0, Color32::from_rgba_unmultiplied(0, 0, 0, ((1.0 - t) * 30.0) as u8),
         );
     }
 }
