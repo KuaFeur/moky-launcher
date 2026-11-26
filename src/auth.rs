@@ -137,7 +137,7 @@ fn random_url_token() -> String {
 fn open_browser(url: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
     #[cfg(target_os = "windows")]
     {
-        Command::new("cmd").args(["/C", "start", "", url]).spawn()?;
+        Command::new("explorer.exe").arg(url).spawn()?;
     }
     #[cfg(target_os = "macos")]
     {
