@@ -307,7 +307,7 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         })
         .send()?;
     let minecraft: LauncherLoginResponse =
-        ensure_minecraft_response(minecraft_response, "Minecraft Launcher Login (/launcher/login)")?.json()?;
+        ensure_http_response(minecraft_response, "Minecraft Launcher Login (/launcher/login)")?.json()?;
 
     // Prism uses the license endpoint with a unique request ID.
     let request_id = format!("{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
@@ -320,7 +320,7 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         .get(format!("https://api.minecraftservices.com/entitlements/license?requestId={request_id}"))
         .bearer_auth(&minecraft.access_token)
         .send()?;
-    let entitlements: EntitlementsResponse = ensure_minecraft_response(
+    let entitlements: EntitlementsResponse = ensure_http_response(
         entitlements_response,
         "Vérification des droits (/entitlements/license)",
     )?.json()?;
@@ -335,7 +335,7 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         .get("https://api.minecraftservices.com/minecraft/profile")
         .bearer_auth(&minecraft.access_token)
         .send()?;
-    let profile: MinecraftProfileResponse = ensure_minecraft_response(
+    let profile: MinecraftProfileResponse = ensure_http_response(
         profile_response,
         "Récupération du profil (/minecraft/profile)",
     )?.json()?;
