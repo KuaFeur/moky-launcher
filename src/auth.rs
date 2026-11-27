@@ -147,7 +147,7 @@ fn http_client() -> Result<Client, Box<dyn Error + Send + Sync>> {
         .build()?)
 }
 
-fn ensure_minecraft_response(
+fn ensure_http_response(
     response: reqwest::blocking::Response,
     stage: &str,
 ) -> Result<reqwest::blocking::Response, Box<dyn Error + Send + Sync>> {
@@ -174,7 +174,7 @@ fn begin_device_code(client: &Client) -> Result<(DeviceCode, String, u64), Box<d
         .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode")
         .form(&[("client_id", CLIENT_ID), ("scope", OAUTH_SCOPE)])
         .send()?;
-    let entitlements_response = ensure_minecraft_response(
+    let entitlements_response = ensure_http_response(
         entitlements_response,
         "Vérification des droits (/entitlements/license)",
     )?;
@@ -256,7 +256,7 @@ fn refresh_microsoft_token(client: &Client, refresh: &str) -> Result<(String, St
 }
 
 fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<MinecraftProfile, Box<dyn Error + Send + Sync>> {
-    let xbox: XboxUserResponse = client
+    let xbox_response = client
         .post("https://user.auth.xboxlive.com/user/authenticate")
         .header("x-xbl-contract-version", "1")
         .json(&XboxUserRequest {
@@ -268,11 +268,11 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
             relying_party: "http://auth.xboxlive.com",
             token_type: "JWT",
         })
-        .send()?
-        .error_for_status()?
-        .json()?;
+        .send()?;
+    let xbox_response = ensure_http_response(xbox_response, "Xbox Live User Authentication (/user/authenticate)")?;
+    let xbox: XboxUserResponse = xbox_response.json()?;
 
-    let xsts: XstsResponse = client
+    let xsts_response = client
         .post("https://xsts.auth.xboxlive.com/xsts/authorize")
         .header("x-xbl-contract-version", "1")
         .json(&XstsRequest {
@@ -283,9 +283,9 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
             relying_party: "rp://api.minecraftservices.com/",
             token_type: "JWT",
         })
-        .send()?
-        .error_for_status()?
-        .json()?;
+        .send()?;
+    let xsts_response = ensure_http_response(xsts_response, "Xbox XSTS Authorization (/xsts/authorize)")?;
+    let xsts: XstsResponse = xsts_response.json()?;
 
     let xbox_user_hash = xbox.display_claims.xui.first()
         .ok_or("Xbox Live (user/authenticate) n'a fourni aucun UHS.")?
