@@ -292,7 +292,10 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         .send()?;
     let minecraft: LauncherLoginResponse =
         ensure_minecraft_response(minecraft_response).map_err(|error| {
-            format!("Minecraft Launcher Login (/launcher/login) a échoué : {error}")
+            std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Minecraft Launcher Login (/launcher/login) a échoué : {error}"),
+            )
         })?.json()?;
 
     // Prism uses the license endpoint with a unique request ID.
