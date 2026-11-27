@@ -7,7 +7,7 @@ use std::{
 };
 
 const CLIENT_ID: &str = "d53c2b5d-6674-4c80-9f3a-a9e5bd4fb0f7";
-const OAUTH_SCOPE: &str = "XboxLive.signin offline_access";
+const OAUTH_SCOPE: &str = "XboxLive.SignIn XboxLive.offline_access";
 const CREDENTIAL_SERVICE: &str = "MokyLauncher";
 const CREDENTIAL_USER: &str = "minecraft-refresh-token";
 
@@ -147,20 +147,26 @@ fn http_client() -> Result<Client, Box<dyn Error + Send + Sync>> {
         .build()?)
 }
 
-fn ensure_minecraft_response(
+fn ensure_http_response(
     response: reqwest::blocking::Response,
+    stage: &str,
 ) -> Result<reqwest::blocking::Response, Box<dyn Error + Send + Sync>> {
-    if response.status().as_u16() == 429 {
-        let retry_after = response.headers()
-            .get(reqwest::header::RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .map(|value| format!(" Indication du serveur : {value}."))
-            .unwrap_or_else(|| " Attendez quelques minutes avant de réessayer.".to_string());
+    let status = response.status();
+    if status.is_success() {
+        return Ok(response);
+    }
+    let retry_after = response.headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| format!(" Retry-After: {value}."))
+        .unwrap_or_default();
+    let body = response.text().unwrap_or_else(|_| "<corps indisponible>".to_string());
+    if status.as_u16() == 429 {
         return Err(format!(
-            "Minecraft Services limite temporairement les connexions (HTTP 429).{retry_after}"
+            "{stage} : HTTP 429 (limitation temporaire).{retry_after} Réponse : {body}"
         ).into());
     }
-    Ok(response.error_for_status()?)
+    Err(format!("{stage} : HTTP {status}. Réponse : {body}").into())
 }
 
 fn begin_device_code(client: &Client) -> Result<(DeviceCode, String, u64), Box<dyn Error + Send + Sync>> {
@@ -238,7 +244,7 @@ fn refresh_microsoft_token(client: &Client, refresh: &str) -> Result<(String, St
             ("client_id", CLIENT_ID),
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh),
-            ("scope", "XboxLive.signin offline_access"),
+            ("scope", OAUTH_SCOPE),
         ])
         .send()?
         .error_for_status()?
@@ -247,7 +253,7 @@ fn refresh_microsoft_token(client: &Client, refresh: &str) -> Result<(String, St
 }
 
 fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<MinecraftProfile, Box<dyn Error + Send + Sync>> {
-    let xbox: XboxUserResponse = client
+    let xbox_response = client
         .post("https://user.auth.xboxlive.com/user/authenticate")
         .header("x-xbl-contract-version", "1")
         .json(&XboxUserRequest {
@@ -259,11 +265,11 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
             relying_party: "http://auth.xboxlive.com",
             token_type: "JWT",
         })
-        .send()?
-        .error_for_status()?
-        .json()?;
+        .send()?;
+    let xbox_response = ensure_http_response(xbox_response, "Xbox Live User Authentication (/user/authenticate)")?;
+    let xbox: XboxUserResponse = xbox_response.json()?;
 
-    let xsts: XstsResponse = client
+    let xsts_response = client
         .post("https://xsts.auth.xboxlive.com/xsts/authorize")
         .header("x-xbl-contract-version", "1")
         .json(&XstsRequest {
@@ -274,13 +280,20 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
             relying_party: "rp://api.minecraftservices.com/",
             token_type: "JWT",
         })
-        .send()?
-        .error_for_status()?
-        .json()?;
+        .send()?;
+    let xsts_response = ensure_http_response(xsts_response, "Xbox XSTS Authorization (/xsts/authorize)")?;
+    let xsts: XstsResponse = xsts_response.json()?;
 
-    let user_hash = xsts.display_claims.xui.first()
-        .ok_or("Xbox n'a fourni aucun identifiant utilisateur.")?
+    let xbox_user_hash = xbox.display_claims.xui.first()
+        .ok_or("Xbox Live (user/authenticate) n'a fourni aucun UHS.")?
         .uhs.clone();
+    let xsts_user_hash = xsts.display_claims.xui.first()
+        .ok_or("Xbox XSTS n'a fourni aucun UHS.")?
+        .uhs.clone();
+    if xbox_user_hash != xsts_user_hash {
+        return Err("Xbox/XSTS : le User Hash (uhs) a changé entre les deux étapes. Authentification interrompue.".into());
+    }
+    let user_hash = xsts_user_hash;
 
     // Match Prism Launcher's PC launcher authentication endpoint and payload.
     let minecraft_response = client
@@ -291,12 +304,7 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         })
         .send()?;
     let minecraft: LauncherLoginResponse =
-        ensure_minecraft_response(minecraft_response).map_err(|error| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Minecraft Launcher Login (/launcher/login) a échoué : {error}"),
-            )
-        })?.json()?;
+        ensure_http_response(minecraft_response, "Minecraft Launcher Login (/launcher/login)")?.json()?;
 
     // Prism uses the license endpoint with a unique request ID.
     let request_id = format!("{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
@@ -305,12 +313,14 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         (rand::random::<u16>() & 0x0fff) | 0x4000,
         (rand::random::<u16>() & 0x3fff) | 0x8000,
         (rand::random::<u64>() & 0xffffffffffff));
-    let entitlements: EntitlementsResponse = client
+    let entitlements_response = client
         .get(format!("https://api.minecraftservices.com/entitlements/license?requestId={request_id}"))
         .bearer_auth(&minecraft.access_token)
-        .send()?
-        .error_for_status()?
-        .json()?;
+        .send()?;
+    let entitlements: EntitlementsResponse = ensure_http_response(
+        entitlements_response,
+        "Vérification des droits (/entitlements/license)",
+    )?.json()?;
 
     if !entitlements.items.iter().any(|item| {
         item.name == "game_minecraft" || item.name == "product_minecraft"
@@ -318,12 +328,14 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         return Err("Ce compte ne possède pas Minecraft: Java Edition (ou l'accès Game Pass correspondant).".into());
     }
 
-    let profile: MinecraftProfileResponse = client
+    let profile_response = client
         .get("https://api.minecraftservices.com/minecraft/profile")
         .bearer_auth(&minecraft.access_token)
-        .send()?
-        .error_for_status()?
-        .json()?;
+        .send()?;
+    let profile: MinecraftProfileResponse = ensure_http_response(
+        profile_response,
+        "Récupération du profil (/minecraft/profile)",
+    )?.json()?;
 
     let skin_url = profile.skins.and_then(|skins| {
         skins.iter()
