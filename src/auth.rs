@@ -106,14 +106,15 @@ struct XstsResponse {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct MinecraftLoginRequest {
-    identity_token: String,
+struct LauncherLoginRequest {
+    xtoken: String,
+    platform: &'static str,
 }
 
 #[derive(Deserialize)]
-struct MinecraftLoginResponse {
+struct LauncherLoginResponse {
     access_token: String,
+    expires_in: u64,
 }
 
 #[derive(Deserialize)]
@@ -281,17 +282,28 @@ fn minecraft_profile(client: &Client, microsoft_token: &str) -> Result<Minecraft
         .ok_or("Xbox n'a fourni aucun identifiant utilisateur.")?
         .uhs.clone();
 
+    // Match Prism Launcher's PC launcher authentication endpoint and payload.
     let minecraft_response = client
-        .post("https://api.minecraftservices.com/authentication/login_with_xbox")
-        .json(&MinecraftLoginRequest {
-            identity_token: format!("XBL3.0 x={user_hash};{}", xsts.token),
+        .post("https://api.minecraftservices.com/launcher/login")
+        .json(&LauncherLoginRequest {
+            xtoken: format!("XBL3.0 x={user_hash};{}", xsts.token),
+            platform: "PC_LAUNCHER",
         })
         .send()?;
-    let minecraft: MinecraftLoginResponse =
-        ensure_minecraft_response(minecraft_response)?.json()?;
+    let minecraft: LauncherLoginResponse =
+        ensure_minecraft_response(minecraft_response).map_err(|error| {
+            format!("Minecraft Launcher Login (/launcher/login) a échoué : {error}")
+        })?.json()?;
 
+    // Prism uses the license endpoint with a unique request ID.
+    let request_id = format!("{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        (rand::random::<u32>()),
+        (rand::random::<u16>()),
+        (rand::random::<u16>() & 0x0fff) | 0x4000,
+        (rand::random::<u16>() & 0x3fff) | 0x8000,
+        (rand::random::<u64>() & 0xffffffffffff));
     let entitlements: EntitlementsResponse = client
-        .get("https://api.minecraftservices.com/entitlements/mcstore")
+        .get(format!("https://api.minecraftservices.com/entitlements/license?requestId={request_id}"))
         .bearer_auth(&minecraft.access_token)
         .send()?
         .error_for_status()?
@@ -342,7 +354,7 @@ pub fn complete_device_sign_in(device_code: &str, expires_in: u64) -> Result<Min
     result.map_err(|error| {
         let message = error.to_string();
         if message.contains("403") || message.to_lowercase().contains("invalid app registration") {
-            format!("{message}\\n\\nMicrosoft doit autoriser le Client ID de Moky Launcher à utiliser Minecraft Services. Le Device Code ne contourne pas cette autorisation.")
+            format!("{message}\n\nLe parcours PC_LAUNCHER de Prism a également été refusé. Cela peut indiquer que le Client ID de Moky n'est pas autorisé par Minecraft Services.")
         } else { message }
     })
 }
