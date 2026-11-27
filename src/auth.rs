@@ -173,12 +173,9 @@ fn begin_device_code(client: &Client) -> Result<(DeviceCode, String, u64), Box<d
     let response: DeviceCodeResponse = client
         .post("https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode")
         .form(&[("client_id", CLIENT_ID), ("scope", OAUTH_SCOPE)])
-        .send()?;
-    let entitlements_response = ensure_http_response(
-        entitlements_response,
-        "Vérification des droits (/entitlements/license)",
-    )?;
-    let entitlements: EntitlementsResponse = entitlements_response.json()?;
+        .send()?
+        .error_for_status()?
+        .json()?;
     let display = DeviceCode {
         user_code: response.user_code,
         verification_uri: response.verification_uri,
