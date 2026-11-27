@@ -244,7 +244,7 @@ fn refresh_microsoft_token(client: &Client, refresh: &str) -> Result<(String, St
             ("client_id", CLIENT_ID),
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh),
-            ("scope", "XboxLive.signin offline_access"),
+            ("scope", OAUTH_SCOPE),
         ])
         .send()?
         .error_for_status()?
